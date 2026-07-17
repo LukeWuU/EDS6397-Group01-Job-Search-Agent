@@ -74,12 +74,14 @@ def test_swap_available_projects_are_returned_correctly() -> None:
     assert len(swap_ids) == 5
     assert swap_ids.isdisjoint(base_ids)
     assert swap_ids == {
+        "proj-carepath-rag",
         "proj-vision-inspect",
         "proj-ledger-anomaly",
-        "proj-grid-forecast",
         "proj-catalog-recs",
         "proj-support-nlp",
     }
+    assert "proj-grid-forecast" in base_ids
+    assert "proj-carepath-rag" in swap_ids
 
 
 def test_cloud_and_mlops_alias_loads_from_json_key() -> None:

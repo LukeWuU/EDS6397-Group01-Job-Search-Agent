@@ -34,7 +34,7 @@
       "evidence_ids": [
         "EV-PROJ-001"
       ],
-      "on_base_resume": true
+      "on_base_resume": false
     },
     {
       "project_id": "proj-retail-demand",
@@ -190,7 +190,7 @@
       "evidence_ids": [
         "EV-PROJ-006"
       ],
-      "on_base_resume": false
+      "on_base_resume": true
     },
     {
       "project_id": "proj-catalog-recs",

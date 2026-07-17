@@ -509,8 +509,13 @@ def test_job_id_mismatch_raises(
         fit_analysis_tool(job, score, repository_bundle, repository_memory, RESUME)
 
 
-def test_resume_visibility_parser_reads_skills_and_projects() -> None:
+def test_resume_visibility_parser_reads_skills_and_projects(
+    repository_bundle: CandidateBundle,
+) -> None:
     visibility = parse_resume_visibility(RESUME)
     assert "Python" in visibility.skills_text
     assert visibility.experience_bullet_texts
-    assert any("CarePath" in entry for entry in visibility.project_entries)
+    for project in repository_bundle.base_resume_projects():
+        assert any(
+            project.name in entry for entry in visibility.project_entries
+        ), f"expected resume project entry for {project.name!r}"

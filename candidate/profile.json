@@ -176,9 +176,9 @@
     ]
   },
   "base_resume_project_ids": [
-    "proj-carepath-rag",
-    "proj-retail-demand",
-    "proj-model-watch"
+    "proj-grid-forecast",
+    "proj-model-watch",
+    "proj-retail-demand"
   ],
   "evidence_summary": [
     {
