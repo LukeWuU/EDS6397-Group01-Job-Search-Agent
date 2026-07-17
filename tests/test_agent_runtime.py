@@ -12,7 +12,7 @@ import pytest
 from src.agent.client import NormalizedAssistantMessage, NormalizedToolCall
 from src.agent.runtime import AgentLoopLimitError, JobSearchAgentRuntime
 from src.config import AppConfig
-from src.observability.tracing import NoOpAgentTracer
+from src.observability.tracing import LangfuseAgentTracer
 from src.services.candidate_loader import load_candidate_bundle
 from src.services.jobs_loader import load_jobs
 from src.services.memory_loader import load_memory
@@ -33,6 +33,7 @@ from tests.test_resume_tailoring_tool import (
     _fake_compiler as fake_resume_compiler,
     _valid_plan as valid_resume_plan,
 )
+from tests.test_tracing import FakeLangfuse
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -295,7 +296,11 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
         )
     )
     provider = ReviewProvider(scores[0].job_id)
-    tracer = NoOpAgentTracer()
+    fake_langfuse = FakeLangfuse()
+    tracer = LangfuseAgentTracer(
+        AppConfig(langfuse_enabled=True, langfuse_public_trace=True),
+        client=fake_langfuse,
+    )
     runtime = _runtime(tmp_path, client, provider, tracer)
     result = runtime.run()
 
@@ -308,6 +313,7 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     assert result.pause_count == 1
     assert result.finalized_resume_count == 3
     assert result.cover_letter_count == 3
+    assert result.trace_url == f"https://trace.local/{result.trace_id}"
     assert provider.calls == 2
     assert client.revision_saw_memory
     assert {call["client_id"] for call in client.calls} == {id(client)}
@@ -349,6 +355,11 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
         assert required.issubset({path.name for path in folder.iterdir()})
     assert len(tracer.traces) == 1
     assert tracer.flush_count == 1
+    assert fake_langfuse.root.public_calls == 1
+    assert fake_langfuse.trace_url_arguments == [result.trace_id]
+    assert len({item.trace_id for item in tracer.traces[0].observations}) == 1
+    assert tracer.traces[0].trace_public is True
+    assert tracer.traces[0].flushed is True
     names = [item.name for item in tracer.traces[0].observations]
     assert "human_review_pause" in names
     assert "memory_write" in names
@@ -384,14 +395,25 @@ def test_three_repeated_invalid_turns_raise_loop_limit(tmp_path):
     _, scores, _, _ = _workflow_plans()
     del scores
     client = AlwaysInvalidClient()
+    fake_langfuse = FakeLangfuse()
+    tracer = LangfuseAgentTracer(
+        AppConfig(langfuse_enabled=True, langfuse_public_trace=True),
+        client=fake_langfuse,
+    )
     runtime = _runtime(
         tmp_path,
         client,
         ReviewProvider("unused"),
-        NoOpAgentTracer(),
+        tracer,
     )
     with pytest.raises(AgentLoopLimitError, match="consecutive invalid"):
         runtime.run()
     assert client.calls == 3
     assert runtime.state is not None
     assert len(runtime.state.invalid_tool_attempts) == 3
+    assert fake_langfuse.root.ended == 1
+    assert fake_langfuse.root.public_calls == 0
+    assert fake_langfuse.trace_url_arguments == []
+    assert fake_langfuse.flushes == 1
+    assert runtime.trace is not None
+    assert runtime.trace.trace_url is None

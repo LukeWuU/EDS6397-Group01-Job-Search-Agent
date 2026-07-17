@@ -24,6 +24,7 @@ def test_documented_defaults_without_env_overrides(monkeypatch: pytest.MonkeyPat
         "OLLAMA_TEMPERATURE",
         "OLLAMA_KEEP_ALIVE",
         "LANGFUSE_ENABLED",
+        "LANGFUSE_PUBLIC_TRACE",
         "LANGFUSE_PUBLIC_KEY",
         "LANGFUSE_SECRET_KEY",
         "LANGFUSE_BASE_URL",
@@ -41,6 +42,7 @@ def test_documented_defaults_without_env_overrides(monkeypatch: pytest.MonkeyPat
     assert config.ollama_temperature == 0.0
     assert config.ollama_keep_alive == "10m"
     assert config.langfuse_enabled is False
+    assert config.langfuse_public_trace is False
     assert config.langfuse_base_url == "https://us.cloud.langfuse.com"
     assert config.project_env == "development"
     assert config.log_level == "INFO"
@@ -51,12 +53,32 @@ def test_boolean_integer_and_float_conversion(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("OLLAMA_NUM_CTX", "4096")
     monkeypatch.setenv("OLLAMA_TEMPERATURE", "0.5")
     monkeypatch.setenv("LANGFUSE_ENABLED", "true")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_TRACE", "yes")
 
     config = load_config(env_path=ROOT / "missing.env")
 
     assert config.ollama_num_ctx == 4096
     assert config.ollama_temperature == 0.5
     assert config.langfuse_enabled is True
+    assert config.langfuse_public_trace is True
+
+    monkeypatch.setenv("LANGFUSE_PUBLIC_TRACE", "false")
+    assert load_config(env_path=ROOT / "missing.env").langfuse_public_trace is False
+
+
+def test_invalid_public_trace_boolean_fails_clearly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGFUSE_PUBLIC_TRACE", "sometimes")
+    with pytest.raises(ValueError, match="Invalid boolean value"):
+        load_config(env_path=ROOT / "missing.env")
+
+
+def test_env_example_documents_safe_public_trace_default() -> None:
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "LANGFUSE_PUBLIC_TRACE=false" in example
+    assert "LANGFUSE_PUBLIC_KEY=\n" in example
+    assert "LANGFUSE_SECRET_KEY=\n" in example
 
 
 def test_invalid_context_size_is_rejected() -> None:

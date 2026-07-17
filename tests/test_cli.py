@@ -9,6 +9,7 @@ import pytest
 
 import src.cli as cli
 from src.agent.state import AgentRunResult
+from src.config import AppConfig
 from src.services.preflight import (
     PreflightCheck,
     PreflightResult,
@@ -42,7 +43,7 @@ def _preflight(repo: Path, *, passed: bool) -> PreflightResult:
     )
 
 
-def _result(*, completed=True) -> AgentRunResult:
+def _result(*, completed=True, trace_url=None) -> AgentRunResult:
     return AgentRunResult(
         run_id="run-cli-test",
         completed=completed,
@@ -62,7 +63,7 @@ def _result(*, completed=True) -> AgentRunResult:
         cover_letter_count=3,
         output_folders={"job-a": Path("outputs/job-a")},
         trace_id="trace-1",
-        trace_url=None,
+        trace_url=trace_url,
         state_summary={"phase": "completed" if completed else "failed"},
     )
 
@@ -173,6 +174,7 @@ def test_yes_constructs_each_dependency_once_and_invokes_runtime_once(
     assert "Agent run completed" in output
     assert "Human Review pauses: 1" in output
     assert "Trace URL: not available" in output
+    assert "Trace visibility: disabled" in output
     assert cli.runtime_module.MAX_MODEL_CALLS == 40
     assert cli.runtime_module.MAX_TOOL_CALLS == 60
 
@@ -203,6 +205,46 @@ def test_keyboard_interrupt_returns_130(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cli, "run_job_search_agent", interrupt)
     assert cli.main(_run_args(repo, "--yes", "--skip-preflight")) == 130
+
+
+@pytest.mark.parametrize(
+    ("config", "trace_url", "expected_url", "expected_visibility"),
+    [
+        (
+            AppConfig(langfuse_enabled=False),
+            None,
+            "Trace URL: not available",
+            "Trace visibility: disabled",
+        ),
+        (
+            AppConfig(langfuse_enabled=True, langfuse_public_trace=False),
+            None,
+            "Trace URL: not publicly available",
+            "Trace visibility: private",
+        ),
+        (
+            AppConfig(langfuse_enabled=True, langfuse_public_trace=True),
+            "https://trace.local/actual-trace",
+            "Trace URL: https://trace.local/actual-trace",
+            "Trace visibility: public",
+        ),
+    ],
+)
+def test_trace_visibility_output(
+    config,
+    trace_url,
+    expected_url,
+    expected_visibility,
+    capsys,
+):
+    config.langfuse_public_key = "must-not-print-public-key"
+    config.langfuse_secret_key = "must-not-print-secret-key"
+    cli._print_success(_result(trace_url=trace_url), config)
+    output = capsys.readouterr().out
+    assert expected_url in output
+    assert expected_visibility in output
+    assert "must-not-print-public-key" not in output
+    assert "must-not-print-secret-key" not in output
 
 
 def test_completed_output_files_are_refused_before_construction(

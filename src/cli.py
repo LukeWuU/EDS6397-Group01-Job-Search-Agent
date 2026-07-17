@@ -162,7 +162,7 @@ def _runtime_limits(max_model_calls: int, max_tool_calls: int):
         runtime_module.MAX_TOOL_CALLS = previous_tool
 
 
-def _print_success(result: AgentRunResult) -> None:
+def _print_success(result: AgentRunResult, config: AppConfig) -> None:
     print("Agent run completed")
     print(f"Run ID: {result.run_id}")
     print(f"Model: {result.model_name}")
@@ -186,7 +186,15 @@ def _print_success(result: AgentRunResult) -> None:
     else:
         print("  none")
     print(f"Trace ID: {result.trace_id or 'not available'}")
-    print(f"Trace URL: {result.trace_url or 'not available'}")
+    if not config.langfuse_enabled:
+        print("Trace URL: not available")
+        print("Trace visibility: disabled")
+    elif config.langfuse_public_trace and result.trace_url:
+        print(f"Trace URL: {result.trace_url}")
+        print("Trace visibility: public")
+    else:
+        print("Trace URL: not publicly available")
+        print("Trace visibility: private")
 
 
 def _print_failure(result: AgentRunResult) -> None:
@@ -297,7 +305,7 @@ def _run_agent_command(args: argparse.Namespace, config: AppConfig) -> int:
         return 1
 
     if result.completed:
-        _print_success(result)
+        _print_success(result, config)
         return 0
     _print_failure(result)
     return 1

@@ -70,6 +70,11 @@ class TraceRecord(BaseModel):
 
     trace_id: str
     trace_url: str | None = None
+    trace_public: bool = False
+    tracing_enabled: bool = False
+    flushed: bool = False
+    publication_error: str | None = None
+    tracing_error: str | None = None
     root: ObservationRecord
     observations: list[ObservationRecord] = Field(default_factory=list)
     flush_count: int = 0
@@ -78,9 +83,15 @@ class TraceRecord(BaseModel):
 class TraceContext:
     """Runtime root trace handle."""
 
-    def __init__(self, record: TraceRecord, native: Any = None) -> None:
+    def __init__(
+        self,
+        record: TraceRecord,
+        native: Any = None,
+        native_context: Any = None,
+    ) -> None:
         self.record = record
         self.native = native
+        self.native_context = native_context
 
     @property
     def trace_id(self) -> str:
@@ -89,6 +100,22 @@ class TraceContext:
     @property
     def trace_url(self) -> str | None:
         return self.record.trace_url
+
+    @property
+    def trace_public(self) -> bool:
+        return self.record.trace_public
+
+    @property
+    def flushed(self) -> bool:
+        return self.record.flushed
+
+    @property
+    def tracing_enabled(self) -> bool:
+        return self.record.tracing_enabled
+
+    @property
+    def publication_error(self) -> str | None:
+        return self.record.publication_error
 
 
 class SpanContext:
@@ -250,6 +277,7 @@ class NoOpAgentTracer:
         self.flush_count += 1
         for trace in self.traces:
             trace.flush_count = self.flush_count
+            trace.flushed = True
 
 
 class LangfuseAgentTracer(NoOpAgentTracer):
@@ -257,6 +285,7 @@ class LangfuseAgentTracer(NoOpAgentTracer):
 
     def __init__(self, config: AppConfig, *, client: Any = None) -> None:
         super().__init__()
+        self._config = config
         if client is None:
             from langfuse import Langfuse
 
@@ -280,18 +309,37 @@ class LangfuseAgentTracer(NoOpAgentTracer):
         local = super().start_trace(
             name, run_id=run_id, input=input, metadata=metadata
         )
-        trace_id = self._client.create_trace_id(seed=run_id)
-        native = self._client.start_observation(
-            trace_context={"trace_id": trace_id},
+        local.record.tracing_enabled = True
+        native_context = self._client.start_as_current_observation(
             name=name,
             as_type="agent",
             input=local.record.root.input,
             metadata=local.record.root.metadata,
+            end_on_exit=True,
         )
+        native = None
+        try:
+            native = native_context.__enter__()
+            trace_id = self._client.get_current_trace_id()
+            if not trace_id:
+                raise RuntimeError(
+                    "Langfuse did not provide an active root trace ID"
+                )
+        except BaseException as exc:
+            if native is not None:
+                try:
+                    native_context.__exit__(
+                        type(exc),
+                        exc,
+                        exc.__traceback__,
+                    )
+                except Exception:
+                    pass
+            raise
         local.record.trace_id = trace_id
         local.record.root.trace_id = trace_id
-        local.record.trace_url = self._client.get_trace_url(trace_id=trace_id)
         local.native = native
+        local.native_context = native_context
         return local
 
     def span(
@@ -330,12 +378,17 @@ class LangfuseAgentTracer(NoOpAgentTracer):
         return local
 
     def end_span(self, span: SpanContext) -> None:
-        span.native.update(
-            output=span.record.output,
-            level="ERROR" if span.record.status == "error" else "DEFAULT",
-            status_message=span.record.error,
-        )
-        span.native.end()
+        try:
+            span.native.update(
+                output=span.record.output,
+                level="ERROR" if span.record.status == "error" else "DEFAULT",
+                status_message=span.record.error,
+            )
+            span.native.end()
+        except Exception as exc:
+            span.trace.record.tracing_error = (
+                f"Child observation close failed: {type(exc).__name__}"
+            )
 
     def end_trace(
         self,
@@ -345,16 +398,64 @@ class LangfuseAgentTracer(NoOpAgentTracer):
         error: str | None = None,
     ) -> None:
         super().end_trace(trace, output=output, error=error)
-        trace.native.update(
-            output=trace.record.root.output,
-            level="ERROR" if error else "DEFAULT",
-            status_message=error,
+        try:
+            trace.native.update(
+                output=trace.record.root.output,
+                level="ERROR" if error else "DEFAULT",
+                status_message=error,
+            )
+        except Exception as exc:
+            trace.record.tracing_error = (
+                f"Root observation update failed: {type(exc).__name__}"
+            )
+
+        completed = (
+            isinstance(output, Mapping)
+            and output.get("completed") is True
+            and error is None
         )
-        trace.native.end()
+        if (
+            completed
+            and self._config.langfuse_public_trace
+            and trace.record.tracing_error is None
+        ):
+            try:
+                trace.native.set_trace_as_public()
+                trace.record.trace_public = True
+                trace_url = self._client.get_trace_url(trace_id=trace.trace_id)
+                if not trace_url:
+                    raise RuntimeError("SDK returned no trace URL")
+                trace.record.trace_url = trace_url
+            except Exception as exc:
+                trace.record.trace_url = None
+                trace.record.publication_error = (
+                    f"Public trace publication failed: {type(exc).__name__}"
+                )
+                if not trace.record.trace_public:
+                    trace.record.trace_public = False
+
+        try:
+            trace.native_context.__exit__(None, None, None)
+        except Exception as exc:
+            trace.record.tracing_error = (
+                f"Root observation close failed: {type(exc).__name__}"
+            )
 
     def flush(self) -> None:
-        super().flush()
-        self._client.flush()
+        self.flush_count += 1
+        try:
+            self._client.flush()
+        except Exception as exc:
+            for trace in self.traces:
+                trace.tracing_error = (
+                    f"Trace flush failed: {type(exc).__name__}"
+                )
+                trace.flushed = False
+                trace.flush_count = self.flush_count
+        else:
+            for trace in self.traces:
+                trace.flushed = True
+                trace.flush_count = self.flush_count
 
 
 def build_agent_tracer(config: AppConfig) -> AgentTracer:

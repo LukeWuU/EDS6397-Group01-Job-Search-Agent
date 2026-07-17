@@ -138,34 +138,31 @@ class JobSearchAgentRuntime:
             },
         )
         failure: str | None = None
+        loop_error: AgentLoopLimitError | None = None
         try:
             self._load_inputs()
             self._reasoning_loop()
         except AgentLoopLimitError as exc:
             failure = str(exc)
+            loop_error = exc
             if self.state is not None:
                 self.state.phase = AgentPhase.FAILED
                 self.state.failure_reason = failure
-            self.tracer.end_trace(
-                self.trace,
-                output=self.state.snapshot() if self.state else None,
-                error=failure,
-            )
-            self.tracer.flush()
-            raise
         except Exception as exc:
             failure = f"{type(exc).__name__}: {exc}"
             if self.state is not None:
                 self.state.phase = AgentPhase.FAILED
                 self.state.failure_reason = failure
-        result = self._build_result(failure)
+        provisional_result = self._build_result(failure)
         self.tracer.end_trace(
             self.trace,
-            output=result.model_dump(mode="json"),
+            output=provisional_result.model_dump(mode="json"),
             error=failure,
         )
         self.tracer.flush()
-        return result
+        if loop_error is not None:
+            raise loop_error
+        return self._build_result(failure)
 
     def _load_inputs(self) -> None:
         assert self.trace is not None
