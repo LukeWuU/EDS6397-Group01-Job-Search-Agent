@@ -1,0 +1,261 @@
+﻿Job Title,Company,Industry/Domain,Location,Required Skills,Years of Experience Required,Job Description (10-20 lines; include responsibilities and qualifications),Company Details (2-3 lines about the company; used for cover letters),URL
+Applied AI Engineer,Quantifind,Financial Crime Risk Intelligence / AI SaaS,"Palo Alto, CA (Hybrid); remote candidates considered",Python; JavaScript; React; PostgreSQL; AI coding tools; agentic workflows; multi-agent testing; rapid prototyping; API integration; test-driven development; client communication,4+ years of professional experience; relevant graduate or PhD work may count,"1. Rapidly prototype AI-enabled applications with internal and external stakeholders.
+2. Build applications from scratch within defined technical frameworks and resources.
+3. Develop independent AI-driven workflows and capabilities for regulated use cases.
+4. Collect, clarify, and validate product requirements during iterative development.
+5. Work across backend, frontend, data, and cloud components as needed.
+6. Use AI coding assistants and agentic workflows to accelerate development responsibly.
+7. Apply quality assurance and test-driven development to prototypes and production code.
+8. Collaborate directly with clients, product teams, designers, and engineers.
+9. Guide successful prototypes toward secure and maintainable production deployment.
+10. Demonstrate strong Python, JavaScript/React, and PostgreSQL development ability.
+11. Bring at least four years of professional technical experience and relevant education.
+12. Meet U.S. citizenship and in-person collaboration requirements when requested.","Quantifind develops AI-powered risk intelligence software used by financial institutions and government agencies to investigate fraud, money laundering, and criminal networks.
+Its SaaS platform analyzes signals from internal and public data to support KYC, customer due diligence, fraud risk management, and AML workflows.",https://www.linkedin.com/jobs/view/applied-ai-engineer-at-quantifind-4431885976
+Machine Learning Engineer,Booz Allen Hamilton,Defense Technology / Government AI,"Alexandria, VA",Python; scikit-learn; TensorFlow; PyTorch; C++; Rust; Java; deep learning; computer vision; generative AI; model training; model deployment; statistical analysis; security clearance,"2+ years of experience in AI, data science, or machine learning engineering","1. Train, test, deploy, and maintain machine learning models for defense missions.
+2. Analyze large and complex datasets using statistical and machine learning methods.
+3. Translate mission needs into reliable AI and ML engineering solutions.
+4. Define technical direction for mission-critical model development and deployment.
+5. Build reusable pipelines for model experimentation, evaluation, and production use.
+6. Collaborate with data scientists, software engineers, and government stakeholders.
+7. Apply deep learning, computer vision, or generative AI where appropriate.
+8. Develop production-quality code using Python and relevant ML frameworks.
+9. Use additional systems languages such as C++, Rust, or Java when required.
+10. Document model behavior, limitations, testing results, and operational requirements.
+11. Bring at least two years of relevant AI, data science, or ML engineering experience.
+12. Obtain and maintain the security clearance required for the client mission.","Booz Allen Hamilton is a technology and management consulting company serving defense, intelligence, and civilian government organizations.
+The company combines AI, cyber, data, engineering, and mission expertise to develop solutions for complex public-sector challenges.",https://www.linkedin.com/jobs/view/machine-learning-engineer-at-booz-allen-hamilton-4430897730
+"Machine Learning Engineer, Level 4",Snap Inc.,Social Media / Recommendation and Content Intelligence,"Palo Alto, CA",Python; machine learning; ranking; recommendation systems; search; content understanding; image generation; TensorFlow; PyTorch; Caffe2; Spark ML; scikit-learn; production ML,"3+ years after a bachelor's degree, or 2+ years after a master's degree, in machine learning or a related field","1. Develop machine learning models for large-scale consumer-facing products.
+2. Improve ranking, recommendation, search, and content-understanding systems.
+3. Design experiments that measure model quality and user-facing impact.
+4. Build training and inference pipelines that operate at production scale.
+5. Work with large behavioral and content datasets to create predictive features.
+6. Collaborate with product, data, infrastructure, and software engineering teams.
+7. Optimize model accuracy, latency, reliability, and resource efficiency.
+8. Contribute to model deployment, monitoring, debugging, and iteration.
+9. Apply deep learning frameworks such as TensorFlow or PyTorch.
+10. Use ML libraries and distributed tooling such as scikit-learn or Spark ML.
+11. Bring relevant post-degree professional machine learning experience.
+12. Communicate technical tradeoffs and results to cross-functional partners.","Snap Inc. is a technology company best known for Snapchat and camera-centered communication products.
+Its products use machine learning to support content discovery, recommendations, augmented reality, advertising, and personalized user experiences.",https://www.linkedin.com/jobs/view/machine-learning-engineer-level-4-at-snap-inc-4420483152
+"Applied Scientist, WHS Data-Tech",Amazon Science,Workplace Safety / Computer Vision and Predictive Analytics,"Bellevue, WA",Python; Java; C++; computer vision; video analytics; image processing; anomaly detection; activity recognition; object detection; optimization; data mining; high-performance computing; model deployment,3+ years building models for business applications; PhD or master's degree plus 4+ years may be required depending on background,"1. Develop scientific models that improve workplace health and safety outcomes.
+2. Build computer vision systems for activity recognition and object detection.
+3. Analyze video, image, sensor, and operational data for risk signals.
+4. Create anomaly-detection and predictive-risk models for real-world environments.
+5. Design experiments and evaluations that measure scientific and business impact.
+6. Work with engineers to productionize models at Amazon operational scale.
+7. Improve model robustness, efficiency, interpretability, and monitoring.
+8. Communicate research findings and technical recommendations to stakeholders.
+9. Program in Python, Java, or C++ and use modern ML methods.
+10. Apply algorithms, optimization, data mining, and high-performance computing.
+11. Bring at least three years of experience building models for business applications.
+12. Hold an advanced quantitative degree or equivalent professional research experience.","Amazon Science applies research in machine learning, computer vision, operations, and data science across Amazon businesses.
+The Workplace Health and Safety Data-Tech organization develops AI, analytics, and connected technologies intended to reduce injuries and improve operational safety.",https://www.linkedin.com/jobs/view/applied-scientist-whs-data-tech-at-amazon-science-4430207131
+"Machine Learning Engineer, Alexa AI",Amazon,Conversational AI / Large Language Models,"Boston, MA",Python; PyTorch; JAX; LLM training; fine-tuning; distillation; inference optimization; vLLM; SGLang; TensorRT; MLOps; distributed systems; software architecture,3+ years of non-internship software development and 2+ years of design or architecture experience,"1. Build machine learning capabilities for Alexa's conversational AI platform.
+2. Develop systems for LLM training, fine-tuning, and model distillation.
+3. Improve inference throughput, latency, memory use, and serving reliability.
+4. Deploy and operate large language models in production environments.
+5. Create reusable ML platform components for experimentation and deployment.
+6. Collaborate with applied scientists and software engineers on model improvements.
+7. Diagnose model-serving bottlenecks and implement performance optimizations.
+8. Apply MLOps practices for testing, release management, monitoring, and rollback.
+9. Use PyTorch or JAX and evaluate tools such as vLLM, SGLang, or TensorRT.
+10. Design scalable software architectures for distributed ML workloads.
+11. Bring at least three years of professional software development experience.
+12. Demonstrate at least two years of system design or architecture experience.","Amazon is a global technology company operating businesses in e-commerce, cloud computing, devices, logistics, media, and artificial intelligence.
+Alexa AI develops the models, platforms, and evaluation systems behind Amazon's conversational assistant and voice-enabled products.",https://www.linkedin.com/jobs/view/machine-learning-engineer-alexa-ai-at-amazon-4394989625
+Machine Learning Engineer I,CNN,Digital Media / Personalization and Content Discovery,"Atlanta, GA",Python; scikit-learn; production ML; recommendation systems; search; NLP; information retrieval; feature stores; A/B testing; cloud platforms; Docker; Kubernetes; MLflow; SQL; CI/CD,1+ year of experience building or operating production machine learning systems,"1. Develop machine learning systems that support CNN's digital products.
+2. Improve content discovery, recommendations, search, and personalization.
+3. Build reliable training, feature, evaluation, and inference pipelines.
+4. Optimize real-time model performance for products serving millions of users.
+5. Collaborate with platform, infrastructure, product, and editorial partners.
+6. Conduct experiments and analyze model and product performance.
+7. Deploy, monitor, troubleshoot, and continuously improve production models.
+8. Apply software engineering practices including testing, Git, and CI/CD.
+9. Use Python and libraries such as scikit-learn for model development.
+10. Work with cloud, container, orchestration, tracking, and SQL technologies.
+11. Bring at least one year of production machine learning experience.
+12. Hold an advanced quantitative degree or demonstrate equivalent technical ability.","CNN is a global news and media organization delivering reporting and digital content across television, web, mobile, and streaming platforms.
+Its data and machine learning teams improve how audiences discover relevant journalism and interact with CNN's consumer products.",https://www.linkedin.com/jobs/view/machine-learning-engineer-i-at-cnn-4417399631
+Generative AI Engineer,EXL,Insurance Analytics / Enterprise Generative AI,"New Jersey, United States",Python; LLMs; RAG; vector search; AI agents; multi-agent workflows; Databricks Genie; Microsoft Copilot Studio; APIs; cloud platforms; prompt engineering; model evaluation; governance; property and casualty insurance,"5+ years of software, machine learning, or AI engineering experience","1. Design and develop generative AI solutions for property and casualty insurance.
+2. Build AI assistants, copilots, and agents that support business workflows.
+3. Implement retrieval-augmented generation and enterprise vector-search patterns.
+4. Create multi-agent workflows with clear orchestration and tool boundaries.
+5. Integrate Databricks Genie, Copilot Studio, APIs, and cloud services.
+6. Develop reusable components for prompts, grounding, evaluation, and monitoring.
+7. Apply governance, security, privacy, and responsible-AI controls.
+8. Partner with business, analytics, architecture, and engineering stakeholders.
+9. Evaluate model quality, factuality, robustness, latency, and business value.
+10. Use Python and modern LLM frameworks to deliver production solutions.
+11. Bring at least five years of software, ML, or AI engineering experience.
+12. Demonstrate knowledge of insurance data and operational processes.","EXL is a global analytics and digital operations company that helps organizations modernize business processes with data, AI, and automation.
+The company serves industries including insurance, healthcare, banking, financial services, retail, and utilities.",https://www.linkedin.com/jobs/view/generative-ai-engineer-at-exl-4429664996
+Machine Learning Engineer,Intel,Semiconductors / Edge and Agentic AI,"Primary: Santa Clara, CA; additional locations may include Phoenix, AZ, Folsom, CA, and Hillsboro, OR (Hybrid)",Python; LLM architectures; model post-training; reinforcement learning; reward models; evaluation benchmarks; multi-GPU training; distributed training; software development; edge AI; agentic AI,"5+ years of software development and 2+ years of ML engineering, data science, or research experience","1. Develop machine learning technologies for client and edge computing platforms.
+2. Build and improve agentic AI and large language model capabilities.
+3. Design model post-training, reinforcement learning, and alignment workflows.
+4. Create evaluation benchmarks and methods for measuring model behavior.
+5. Develop reward models and environments for iterative model improvement.
+6. Run training and experimentation across multi-GPU systems.
+7. Optimize models for local, edge, and hybrid local-cloud deployment.
+8. Collaborate with research, silicon, software, and product engineering teams.
+9. Write robust Python code and production-quality ML infrastructure.
+10. Communicate experimental results, tradeoffs, and system requirements.
+11. Bring at least five years of professional software development experience.
+12. Demonstrate at least two years of applied ML engineering or research experience.","Intel designs semiconductor processors, platforms, and software used in personal computing, data centers, networking, and edge systems.
+Its AI initiatives span hardware acceleration, optimized software, local inference, and intelligent client experiences.",https://www.linkedin.com/jobs/view/machine-learning-engineer-at-intel-4427792503
+"Applied Scientist, AWS Quick",Amazon Web Services (AWS),Cloud Computing / Agentic AI and Intelligent Automation,"Santa Clara, CA (Hybrid)",Python; Java; C++; autonomous agents; API orchestration; planning; multimodal models; vision-language models; reinforcement learning; symbolic reasoning; optimization; high-performance computing; experimentation,3+ years building models for business applications; PhD or master's degree plus 4+ years may be required depending on background,"1. Conduct applied research for intelligent automation and agentic AI products.
+2. Develop autonomous agents capable of planning, tool use, and API orchestration.
+3. Investigate multimodal and vision-language approaches for business workflows.
+4. Combine neural, reinforcement-learning, and symbolic reasoning techniques.
+5. Design experiments that compare model quality, reliability, and efficiency.
+6. Build prototypes and partner with engineers to move research into production.
+7. Develop evaluation methods for reasoning, task completion, and safety.
+8. Communicate findings through technical documents, reviews, and presentations.
+9. Program in Python, Java, or C++ and use modern scientific tooling.
+10. Apply algorithms, optimization, statistics, and high-performance computing.
+11. Bring at least three years of experience building business-facing models.
+12. Hold an advanced technical degree or equivalent applied research experience.","Amazon Web Services is a global cloud platform offering computing, storage, databases, analytics, machine learning, and generative AI services.
+AWS Quick focuses on intelligent automation experiences that help customers complete business tasks using AI agents and cloud services.",https://www.linkedin.com/jobs/view/applied-scientist-aws-quick-at-amazon-web-services-aws-4418452068
+Staff Machine Learning Engineer,CVS Health,Healthcare / Enterprise Generative AI,"Hartford, CT",Python; AWS Bedrock; GCP Vertex AI; generative AI; vector search; agentic frameworks; serverless computing; event-driven architecture; cloud security; MLOps; responsible AI; healthcare data,Staff-level role; exact minimum years should be confirmed on the LinkedIn posting,"1. Design and operationalize scalable generative AI solutions for healthcare use cases.
+2. Build secure agentic applications using cloud-native AI services.
+3. Implement vector search, retrieval, grounding, and model orchestration.
+4. Develop serverless and event-driven architectures for production AI workloads.
+5. Integrate AWS Bedrock, GCP Vertex AI, and supporting enterprise systems.
+6. Establish testing, evaluation, monitoring, and observability practices.
+7. Apply privacy, security, governance, and responsible-AI requirements.
+8. Collaborate with product, clinical, data, architecture, and engineering teams.
+9. Translate complex business requirements into reliable AI capabilities.
+10. Mentor engineers and influence technical standards across the organization.
+11. Demonstrate senior production experience with ML and generative AI systems.
+12. Understand healthcare data sensitivity and regulated technology environments.","CVS Health is a healthcare company whose businesses include pharmacy services, health insurance, care delivery, and consumer health products.
+Its technology teams use data and AI to improve experiences for members, patients, providers, and employees while operating under healthcare privacy and safety requirements.",https://www.linkedin.com/jobs/view/staff-machine-learning-engineer-at-cvs-health-4433367684
+AI Engineer,Flash AI,Public Safety / Investigative AI Software,"Remote, United States",Python; production ML; LLMs; RAG; prompt design; chunking; embeddings; vector search; vector databases; evaluation; AWS GovCloud; speech recognition; NLP; data pipelines,2+ years of production machine learning or AI engineering experience,"1. Build production AI capabilities for investigative and public-safety software.
+2. Develop LLM and retrieval-augmented generation features for case information.
+3. Design document chunking, embedding, indexing, and vector-search pipelines.
+4. Improve prompt design, grounding, citation quality, and model evaluation.
+5. Integrate speech recognition, transcription, and NLP components.
+6. Deploy secure services in AWS and government-cloud environments.
+7. Create monitoring and testing for accuracy, latency, and reliability.
+8. Work with product and engineering teams to define user-facing workflows.
+9. Handle sensitive information with appropriate privacy and security controls.
+10. Write maintainable Python services and data-processing pipelines.
+11. Bring at least two years of production ML or AI engineering experience.
+12. Communicate model limitations and support responsible operational use.","Flash AI develops investigative software intended to help law-enforcement and public-safety teams organize and analyze case information.
+The company applies language, retrieval, and speech technologies to reduce manual work while emphasizing secure handling of sensitive data.",https://www.indeed.com/viewjob?jk=b7622571bec57e5a
+AI Engineer,Chickasaw Nation Industries,Federal Government Technology / Agentic AI,Remote,Python; JavaScript; REST APIs; OpenAI; AWS Bedrock; prompt engineering; LangGraph; Agno; CrewAI; RAG; vector databases; pandas; NumPy; scikit-learn; Docker; cloud; Git; CI/CD; observability; guardrails,5+ years across the software development lifecycle and 1+ year with generative AI or LLM solutions,"1. Develop AI applications that improve federal workflows and decision support.
+2. Build prototypes and proofs of concept for generative AI use cases.
+3. Create agentic workflows with planning, tool use, and task orchestration.
+4. Implement retrieval-augmented generation and vector-database integration.
+5. Connect AI services through REST APIs and cloud platforms.
+6. Add observability, guardrails, security, and human-review controls.
+7. Evaluate model quality, reliability, risk, and operational performance.
+8. Package and deploy applications using Docker and CI/CD practices.
+9. Collaborate with federal stakeholders, architects, and software teams.
+10. Use Python, JavaScript, and modern agent-orchestration frameworks.
+11. Bring five or more years of software development lifecycle experience.
+12. Demonstrate at least one year of hands-on generative AI or LLM work.","Chickasaw Nation Industries is a holding company with subsidiaries providing technology, infrastructure, health, and professional services to federal and commercial customers.
+Company profits support programs and services for Chickasaw Nation citizens, linking its government-contracting work to a broader community mission.",https://www.indeed.com/viewjob?jk=ce9889ce51319f1e
+AI Engineer | Camden Corporate Office (Remote Position),Camden Property Trust,Real Estate / Enterprise AI Innovation,"Houston, TX 77056 (Remote position)",Python; REST APIs; vector databases; prompt engineering; RAG; Azure OpenAI; Anthropic; AWS Bedrock; agent frameworks; MLOps; LLMOps; Microsoft Copilot Studio; evaluation; responsible AI,3+ years in software engineering or applied ML and 1+ year with generative AI or LLM applications,"1. Prototype AI solutions in Camden's corporate AI innovation environment.
+2. Translate real-estate and business needs into testable AI use cases.
+3. Build LLM applications using prompting, retrieval, and vector databases.
+4. Integrate commercial model providers and cloud AI services.
+5. Experiment with agent frameworks and low-code tools such as Copilot Studio.
+6. Design evaluations for quality, safety, usefulness, latency, and cost.
+7. Document prototypes and hand successful solutions to production teams.
+8. Apply responsible-AI, privacy, security, and data-governance principles.
+9. Collaborate with operations, product, data, and engineering stakeholders.
+10. Use Python, REST APIs, and modern MLOps or LLMOps practices.
+11. Bring at least three years of software engineering or applied ML experience.
+12. Demonstrate at least one year of practical generative AI development.","Camden Property Trust is a publicly traded real-estate investment trust that develops, owns, and manages multifamily residential communities.
+Its corporate technology organization explores AI tools that can improve resident services, property operations, employee productivity, and decision-making.",https://www.indeed.com/viewjob?jk=ec63ca62ba79a81c
+AI Engineer,BlackLine,Financial Technology / Agentic AI for Accounting,Remote or hybrid; employees within commuting distance may be expected in office three days per week,LLMs; RAG; multi-agent orchestration; GCP; AWS; model lifecycle; evaluation; monitoring; security; MLOps; customer-facing AI; prototyping; governance,2+ years in customer-facing machine learning or agentic AI work; internships may count,"1. Prototype customer-facing AI solutions for finance and accounting workflows.
+2. Build agentic applications using LLMs, retrieval, and multi-agent orchestration.
+3. Create demonstrations and minimum viable products for customer validation.
+4. Assess technical feasibility, product value, data requirements, and risks.
+5. Partner with customers, product teams, architects, and engineering groups.
+6. Define evaluation methods for model quality and task completion.
+7. Establish monitoring, security, governance, and lifecycle practices.
+8. Move validated prototypes toward reliable production implementation.
+9. Use cloud AI and ML services, with GCP experience preferred.
+10. Communicate technical concepts clearly to customer and business audiences.
+11. Bring at least two years of relevant ML or agentic AI experience.
+12. Hold an advanced technical degree or demonstrate equivalent practical expertise.","BlackLine provides cloud software that automates and controls accounting and financial-close processes for enterprise finance teams.
+Its AI initiatives aim to reduce manual reconciliation work, improve financial visibility, and introduce intelligent assistance into accounting workflows.",https://www.indeed.com/viewjob?jk=d06a7b2204e3186e
+Senior Machine Learning Engineer,Vitol,Energy and Commodities Trading / Predictive Analytics,"Houston, TX (In-office)",Python; PyTorch; scikit-learn; Transformers; time series; NLP; LLMs; optimization; AWS; Docker; Kubernetes; CI/CD; Airflow; Dagster; model serving; production software engineering,5+ years of industry experience deploying machine learning or statistical models,"1. Build and deploy machine learning models for energy and commodities trading.
+2. Develop models for pricing, supply and demand, and trade-flow analysis.
+3. Contribute to internal generative AI and conversational-assistant capabilities.
+4. Own work across data preparation, modeling, evaluation, deployment, and monitoring.
+5. Integrate models with trading, analytics, and decision-support systems.
+6. Develop robust production code and reusable ML platform components.
+7. Apply time-series methods, optimization, NLP, transformers, and LLM techniques.
+8. Operate models using AWS, containers, orchestration, and workflow systems.
+9. Partner with traders, analysts, data engineers, and software developers.
+10. Explain model assumptions, uncertainty, and operational limitations.
+11. Bring at least five years of industry model-development and deployment experience.
+12. Work regularly from the Houston office in a collaborative trading environment.","Vitol is a global energy and commodities company involved in trading, logistics, refining, storage, and energy distribution.
+The company uses market data, operational information, and quantitative analysis to support decisions across global energy markets while investing in lower-carbon and renewable activities.",https://www.indeed.com/viewjob?jk=592e30099e512b90
+Machine Learning Engineer,Multi Media LLC,Live Streaming / Consumer Personalization,"Remote, United States",Python; scikit-learn; PyTorch; TensorFlow; XGBoost; pandas; NumPy; search; recommender systems; personalization; computer vision; predictive modeling; ranking; large-scale production systems,"3+ years building, deploying, or maintaining production machine learning systems","1. Build machine learning systems for a global live-streaming platform.
+2. Improve search, recommendations, discovery, ranking, and personalization.
+3. Develop predictive models using large-scale behavioral and content data.
+4. Participate in technical design for models, pipelines, deployment, and monitoring.
+5. Create production training and inference workflows that scale with traffic.
+6. Evaluate model impact on user discovery, engagement, and retention.
+7. Collaborate with product, backend, data, and MLOps engineering teams.
+8. Monitor model health, diagnose failures, and respond to data drift.
+9. Write high-quality Python using common ML libraries and frameworks.
+10. Apply experience with consumer-facing and high-traffic ML products.
+11. Bring at least three years of production machine learning experience.
+12. Communicate design decisions and performance results to technical partners.","Multi Media LLC operates Chaturbate, a global live-streaming platform connecting creators and viewers at high scale.
+Its engineering teams work on low-latency media delivery, discovery, personalization, moderation, and platform reliability.",https://www.indeed.com/viewjob?jk=83e7621f8f4b6ce1
+Machine Learning Engineer,Verus Research LLC,Autonomous Systems / Scientific Research and Defense,United States (In person),Python; R; C++; PyTorch; TensorFlow; CNNs; RNNs; NLP; time series; statistical inference; stochastic processes; optimal control; data pipelines; robotics; spacecraft autonomy; U.S. citizenship,3+ years of machine learning experience,"1. Conduct research and development in AI, machine learning, and autonomous systems.
+2. Initially support machine learning work related to spacecraft autonomy.
+3. Develop models for perception, prediction, decision-making, and control.
+4. Apply statistical inference, stochastic processes, and optimal-control methods.
+5. Use deep learning approaches including CNNs, RNNs, and NLP models.
+6. Analyze time-series, sensor, simulation, and experimental datasets.
+7. Build data pipelines and software prototypes for research evaluation.
+8. Collaborate with scientists, engineers, and government research customers.
+9. Program in Python, R, or C++ and use PyTorch or TensorFlow.
+10. Document methods, experiments, assumptions, and technical findings.
+11. Bring at least three years of machine learning experience and an advanced degree.
+12. Meet U.S. citizenship and other eligibility requirements for project work.","Verus Research is an advanced research and engineering company working on scientific, defense, autonomous-system, and high-technology programs.
+Its teams combine modeling, experimentation, software, controls, and machine learning to solve complex government and industrial research problems.",https://www.indeed.com/viewjob?jk=dadeb9d48085f2d0
+AI Engineer,BEAR Cloud,Cloud and Big Data Services / Enterprise AI,Remote (Full-time contract),Python; Java; C; Bash; TensorFlow; AWS; Hadoop; Spark; SQL; ETL; NLP; data mining; model deployment; model monitoring; AI compilers; C++; code generation; cloud integration,"Experience questionnaire requests approximately 3 years in AI compiler development, C++, code generation, and ML frameworks","1. Develop AI and machine learning solutions for enterprise technology projects.
+2. Build data-processing and model pipelines using cloud and big-data platforms.
+3. Implement NLP, data-mining, and predictive-modeling capabilities.
+4. Develop integrations between applications, data systems, and ML services.
+5. Support model deployment, performance testing, monitoring, and maintenance.
+6. Work with AWS, Hadoop, Spark, SQL, and ETL technologies.
+7. Program in Python and other languages required by the project environment.
+8. Contribute to AI compiler, code-generation, or framework-related development.
+9. Document architectures, interfaces, model behavior, and operational procedures.
+10. Collaborate with cloud engineers, data teams, and client stakeholders.
+11. Demonstrate several years of relevant AI, C++, or ML-framework experience.
+12. Deliver work effectively in a remote, full-time contract arrangement.","BEAR Cloud provides cloud, infrastructure, data, and technology consulting services for organizations modernizing enterprise systems.
+Its projects combine cloud platforms, data engineering, analytics, and AI to support scalable business applications.",https://www.indeed.com/viewjob?jk=c8d891b4246fa841
+Generative AI Engineer,Infinite Electronics International,Electronics Distribution / Enterprise Generative AI,"Lewisville, TX 75056",LLM applications; agentic AI; multi-step RAG; prompt versioning; workflow versioning; structured outputs; model routing; monitoring; tracing; CI/CD; evaluation pipelines; human-in-the-loop; guardrails; Azure; FastAPI; asyncio; Pydantic; Docker,Exact minimum not explicitly stated; senior production generative AI engineering experience is required,"1. Design and build production generative AI applications for enterprise use.
+2. Develop agentic workflows and multi-step retrieval-augmented generation systems.
+3. Create reusable standards for prompts, workflows, structured outputs, and routing.
+4. Build evaluation pipelines covering quality, regression, safety, latency, and cost.
+5. Implement monitoring, tracing, feedback collection, and incident diagnosis.
+6. Add human-in-the-loop review, guardrails, and fallback behavior.
+7. Develop API services using FastAPI, asyncio, and Pydantic.
+8. Package and release applications through Docker and CI/CD pipelines.
+9. Integrate Azure services, models, enterprise data, and internal applications.
+10. Collaborate with product, data, security, architecture, and engineering teams.
+11. Demonstrate senior experience delivering production-grade generative AI systems.
+12. Establish engineering practices that other AI teams can consistently follow.","Infinite Electronics is a global supplier and distributor of electronic components, connectivity products, and related technical solutions.
+Its digital and enterprise technology teams support e-commerce, product data, operations, and customer experiences across a portfolio of electronics brands.",https://www.indeed.com/viewjob?jk=75dd65001f023a35
+Machine Learning Engineer,"AMETEK, Inc.",Industrial Technology / IoT and Applied Machine Learning,"Herndon, VA 20171 (Hybrid)",Python; PyTorch; scikit-learn; AWS; Azure; GCP; SageMaker; Vertex AI; Azure ML; vector databases; LLM fine-tuning; embeddings; RAG; Docker; Kubernetes; MLflow; feature stores; CI/CD; distributed systems,"3+ years as an ML Engineer, Applied Scientist, or Data Scientist with hands-on software engineering responsibilities","1. Design, build, and deploy production-grade machine learning models.
+2. Work across the full lifecycle from data pipelines to monitoring and iteration.
+3. Apply machine learning to IoT datasets, product needs, and customer problems.
+4. Deliver reliable, scalable, and high-performance model services.
+5. Participate in a Scrum team and produce maintainable, tested software.
+6. Support deployed models and improve them as data and requirements change.
+7. Use Python, PyTorch, and scikit-learn for model and application development.
+8. Deploy solutions using AWS, Azure, GCP, or managed ML services.
+9. Apply GenAI components such as embeddings, vector databases, fine-tuning, and RAG.
+10. Use MLOps tools including Docker, Kubernetes, MLflow, feature stores, and CI/CD.
+11. Bring at least three years of relevant production ML and software experience.
+12. Demonstrate strong knowledge of algorithms, data structures, and distributed systems.","AMETEK is a global manufacturer of electronic instruments and electromechanical devices serving industrial, aerospace, energy, medical, and other technical markets.
+The Telular business unit develops connected and IoT-enabled products, creating opportunities to apply machine learning to device and operational data.",https://www.indeed.com/viewjob?jk=37433ca9d18914f5

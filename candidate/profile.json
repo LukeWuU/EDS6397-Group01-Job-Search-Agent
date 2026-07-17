@@ -1,0 +1,214 @@
+{
+  "schema_version": "1.0",
+  "candidate_id": "cand-mira-solenne-001",
+  "persona": {
+    "full_name": "Mira Solenne",
+    "city": "Houston",
+    "state": "Texas",
+    "phone": "713-555-0142",
+    "email": "mira.solenne@example.com",
+    "github": "github.com/mira-solenne-labs",
+    "fictional": true
+  },
+  "preferences": {
+    "preferred_locations": [
+      "Houston, Texas",
+      "Austin, Texas",
+      "Remote within the United States"
+    ],
+    "remote_preference": "Remote or hybrid accepted",
+    "onsite_policy": "Onsite roles are accepted only in Houston, Texas or Austin, Texas",
+    "years_of_experience": 3,
+    "excluded_companies": [
+      "Booz Allen Hamilton"
+    ],
+    "target_job_titles": [
+      "Machine Learning Engineer",
+      "AI Engineer",
+      "Generative AI Engineer",
+      "Applied Data Scientist",
+      "MLOps Engineer"
+    ],
+    "target_domains": [
+      "Healthcare",
+      "Financial Services",
+      "Industrial Systems",
+      "Retail and Supply Chain",
+      "Enterprise Knowledge Systems"
+    ]
+  },
+  "education": [
+    {
+      "education_id": "edu-ms-001",
+      "institution": "Gulf Prairie Institute of Technology",
+      "location": "Houston, Texas",
+      "degree": "M.S. in Applied Data Science",
+      "graduation_date": "December 2023",
+      "gpa": "3.82/4.00",
+      "evidence_ids": [
+        "EV-EDU-001"
+      ]
+    },
+    {
+      "education_id": "edu-bs-001",
+      "institution": "Redwood Plains University",
+      "location": "San Marcos, Texas",
+      "degree": "B.S. in Computer Science",
+      "graduation_date": "May 2021",
+      "gpa": null,
+      "evidence_ids": [
+        "EV-EDU-002"
+      ]
+    }
+  ],
+  "experience": [
+    {
+      "experience_id": "exp-ml-engineer-001",
+      "job_title": "Machine Learning Engineer",
+      "employer": "Northstar Lantern Analytics",
+      "location": "Houston, Texas",
+      "start_date": "August 2023",
+      "end_date": "Present",
+      "is_primary_role": true,
+      "fictional_employer": true,
+      "evidence_ids": [
+        "EV-EXP-001"
+      ],
+      "bullets": [
+        {
+          "bullet_id": "exp-primary-bullet-1",
+          "text": "Built Python and scikit-learn risk models over SQL data pipelines, raising validated recall by 14% while holding the false-positive rate constant.",
+          "editable_for_job_tailoring": true,
+          "evidence_ids": [
+            "EV-EXP-BULLET-001"
+          ]
+        },
+        {
+          "bullet_id": "exp-primary-bullet-2",
+          "text": "Delivered a retrieval-augmented knowledge API with FastAPI, embeddings, and vector search, reducing median analyst lookup time by 36% in a controlled pilot.",
+          "editable_for_job_tailoring": true,
+          "evidence_ids": [
+            "EV-EXP-BULLET-002"
+          ]
+        },
+        {
+          "bullet_id": "exp-primary-bullet-3",
+          "text": "Containerized model services on AWS and added MLflow tracking, pytest checks, and drift alerts, cutting failed monthly releases from five to two over six months.",
+          "editable_for_job_tailoring": false,
+          "immutable_for_job_tailoring": true,
+          "evidence_ids": [
+            "EV-EXP-BULLET-003"
+          ]
+        }
+      ]
+    },
+    {
+      "experience_id": "exp-data-science-intern-001",
+      "job_title": "Data Science Intern",
+      "employer": "Copper Finch Systems",
+      "location": "Austin, Texas",
+      "start_date": "June 2022",
+      "end_date": "August 2022",
+      "is_primary_role": false,
+      "fictional_employer": true,
+      "evidence_ids": [
+        "EV-EXP-002"
+      ],
+      "bullets": [
+        {
+          "bullet_id": "exp-intern-bullet-1",
+          "text": "Prepared pandas and NumPy feature pipelines for equipment sensor data and trained a PyTorch anomaly model that improved F1 by 9% over the baseline.",
+          "editable_for_job_tailoring": false,
+          "immutable_for_job_tailoring": true,
+          "evidence_ids": [
+            "EV-EXP-BULLET-004"
+          ]
+        },
+        {
+          "bullet_id": "exp-intern-bullet-2",
+          "text": "Created SQL quality checks and Git-based test fixtures that reduced recurring data-validation defects by 28% across four weekly reporting runs.",
+          "editable_for_job_tailoring": false,
+          "immutable_for_job_tailoring": true,
+          "evidence_ids": [
+            "EV-EXP-BULLET-005"
+          ]
+        }
+      ]
+    }
+  ],
+  "master_skills": {
+    "languages": [
+      "Python",
+      "SQL",
+      "Bash"
+    ],
+    "ml_and_data": [
+      "scikit-learn",
+      "PyTorch",
+      "pandas",
+      "NumPy",
+      "NLP",
+      "Transformers",
+      "Time Series Forecasting",
+      "Computer Vision",
+      "Model Evaluation"
+    ],
+    "generative_ai": [
+      "Retrieval-Augmented Generation",
+      "Embeddings",
+      "Vector Search",
+      "Prompt Engineering"
+    ],
+    "cloud_and_mLOps": [
+      "AWS",
+      "MLOps",
+      "Docker",
+      "MLflow",
+      "Model Monitoring",
+      "CI/CD"
+    ],
+    "systems_and_tools": [
+      "FastAPI",
+      "REST APIs",
+      "Git",
+      "pytest",
+      "PostgreSQL"
+    ]
+  },
+  "base_resume_project_ids": [
+    "proj-carepath-rag",
+    "proj-retail-demand",
+    "proj-model-watch"
+  ],
+  "evidence_summary": [
+    {
+      "category": "education",
+      "evidence_ids": [
+        "EV-EDU-001",
+        "EV-EDU-002"
+      ]
+    },
+    {
+      "category": "experience",
+      "evidence_ids": [
+        "EV-EXP-001",
+        "EV-EXP-002",
+        "EV-EXP-BULLET-001",
+        "EV-EXP-BULLET-002",
+        "EV-EXP-BULLET-003",
+        "EV-EXP-BULLET-004",
+        "EV-EXP-BULLET-005"
+      ]
+    },
+    {
+      "category": "master_skills",
+      "evidence_ids": [
+        "EV-SKILL-LANG",
+        "EV-SKILL-ML",
+        "EV-SKILL-GENAI",
+        "EV-SKILL-MLOPS",
+        "EV-SKILL-SYSTEMS"
+      ]
+    }
+  ]
+}

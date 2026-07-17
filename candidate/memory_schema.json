@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/job-search-agent-memory-1.0.json",
+  "title": "Job Search Agent Candidate Memory",
+  "description": "Persistent memory for candidate skills and candidate facts learned only during the single candidate-review pause. Job opinions and unsupported resume edits are not valid memory facts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "facts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "candidate_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/fact"
+      }
+    }
+  },
+  "$defs": {
+    "normalized_value": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "review_round",
+        "run_id",
+        "reviewer_role"
+      ],
+      "properties": {
+        "source": {
+          "const": "candidate_review"
+        },
+        "review_round": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewer_role": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fact_id",
+        "fact_type",
+        "statement",
+        "normalized_value",
+        "skill_tags",
+        "evidence_refs",
+        "provenance",
+        "created_at",
+        "applied_in_run"
+      ],
+      "properties": {
+        "fact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fact_type": {
+          "enum": [
+            "skill",
+            "candidate_fact"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "normalized_value": {
+          "$ref": "#/$defs/normalized_value"
+        },
+        "skill_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "applied_in_run": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

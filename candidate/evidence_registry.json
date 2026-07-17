@@ -1,0 +1,609 @@
+{
+  "schema_version": "1.0",
+  "candidate_id": "cand-mira-solenne-001",
+  "evidence_records": [
+    {
+      "evidence_id": "EV-EDU-001",
+      "evidence_type": "education",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "edu-ms-001",
+      "claim": "Mira Solenne earned a fictional M.S. in Applied Data Science from Gulf Prairie Institute of Technology in December 2023 with a 3.82/4.00 GPA.",
+      "supported_skills": [],
+      "provenance": {
+        "origin": "fictional_candidate_design",
+        "fictional": true
+      },
+      "allowed_uses": [
+        "base_resume",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-EDU-002",
+      "evidence_type": "education",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "edu-bs-001",
+      "claim": "Mira Solenne earned a fictional B.S. in Computer Science from Redwood Plains University in May 2021.",
+      "supported_skills": [],
+      "provenance": {
+        "origin": "fictional_candidate_design",
+        "fictional": true
+      },
+      "allowed_uses": [
+        "base_resume",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-EXP-001",
+      "evidence_type": "experience",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "exp-ml-engineer-001",
+      "claim": "Mira Solenne has worked in the fictional Machine Learning Engineer role at Northstar Lantern Analytics from August 2023 to the present.",
+      "supported_skills": [
+        "Python",
+        "SQL",
+        "scikit-learn",
+        "Retrieval-Augmented Generation",
+        "FastAPI",
+        "AWS",
+        "Docker",
+        "MLflow",
+        "Model Monitoring",
+        "pytest"
+      ],
+      "provenance": {
+        "origin": "fictional_candidate_design",
+        "fictional": true
+      },
+      "allowed_uses": [
+        "base_resume",
+        "experience_alignment",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-EXP-002",
+      "evidence_type": "experience",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "exp-data-science-intern-001",
+      "claim": "Mira Solenne completed the fictional Data Science Intern role at Copper Finch Systems from June through August 2022.",
+      "supported_skills": [
+        "Python",
+        "SQL",
+        "pandas",
+        "NumPy",
+        "PyTorch",
+        "Git"
+      ],
+      "provenance": {
+        "origin": "fictional_candidate_design",
+        "fictional": true
+      },
+      "allowed_uses": [
+        "base_resume",
+        "experience_alignment",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-EXP-BULLET-001",
+      "evidence_type": "experience_bullet",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "exp-primary-bullet-1",
+      "claim": "Built Python and scikit-learn risk models over SQL data pipelines, raising validated recall by 14% while holding the false-positive rate constant.",
+      "supported_skills": [
+        "Python",
+        "SQL",
+        "scikit-learn",
+        "Model Evaluation"
+      ],
+      "provenance": {
+        "origin": "fictional_candidate_design",
+        "fictional": true,
+        "measurement_context": "held-out validation set"
+      },
+      "allowed_uses": [
+        "base_resume",
+        "fit_analysis",
+        "tailored_experience_bullet",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-EXP-BULLET-002",
+      "evidence_type": "experience_bullet",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "exp-primary-bullet-2",
+      "claim": "Delivered a retrieval-augmented knowledge API with FastAPI, embeddings, and vector search, reducing median analyst lookup time by 36% in a controlled pilot.",
+      "supported_skills": [
+        "Python",
+        "Retrieval-Augmented Generation",
+        "Embeddings",
+        "Vector Search",
+        "FastAPI",
+        "REST APIs"
+      ],
+      "provenance": {
+        "origin": "fictional_candidate_design",
+        "fictional": true,
+        "measurement_context": "controlled analyst pilot"
+      },
+      "allowed_uses": [
+        "base_resume",
+        "fit_analysis",
+        "tailored_experience_bullet",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-EXP-BULLET-003",
+      "evidence_type": "experience_bullet",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "exp-primary-bullet-3",
+      "claim": "Containerized model services on AWS and added MLflow tracking, pytest checks, and drift alerts, cutting failed monthly releases from five to two over six months.",
+      "supported_skills": [
+        "AWS",
+        "Docker",
+        "MLflow",
+        "Model Monitoring",
+        "pytest",
+        "CI/CD"
+      ],
+      "provenance": {
+        "origin": "fictional_candidate_design",
+        "fictional": true,
+        "measurement_context": "six monthly release cycles"
+      },
+      "allowed_uses": [
+        "base_resume",
+        "fit_analysis",
+        "immutable_resume_content",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-EXP-BULLET-004",
+      "evidence_type": "experience_bullet",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "exp-intern-bullet-1",
+      "claim": "Prepared pandas and NumPy feature pipelines for equipment sensor data and trained a PyTorch anomaly model that improved F1 by 9% over the baseline.",
+      "supported_skills": [
+        "Python",
+        "pandas",
+        "NumPy",
+        "PyTorch",
+        "Model Evaluation"
+      ],
+      "provenance": {
+        "origin": "fictional_candidate_design",
+        "fictional": true,
+        "measurement_context": "held-out sensor dataset"
+      },
+      "allowed_uses": [
+        "base_resume",
+        "fit_analysis",
+        "immutable_resume_content",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-EXP-BULLET-005",
+      "evidence_type": "experience_bullet",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "exp-intern-bullet-2",
+      "claim": "Created SQL quality checks and Git-based test fixtures that reduced recurring data-validation defects by 28% across four weekly reporting runs.",
+      "supported_skills": [
+        "SQL",
+        "Git",
+        "pytest"
+      ],
+      "provenance": {
+        "origin": "fictional_candidate_design",
+        "fictional": true,
+        "measurement_context": "four weekly reporting runs"
+      },
+      "allowed_uses": [
+        "base_resume",
+        "fit_analysis",
+        "immutable_resume_content",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-PROJ-001",
+      "evidence_type": "project",
+      "source_file": "candidate/portfolio.json",
+      "source_record_id": "proj-carepath-rag",
+      "claim": "CarePath Evidence Navigator used Python, FastAPI, PostgreSQL, embeddings, vector search, and Docker to retrieve an approved supporting passage in the top three for 87% of 120 synthetic questions.",
+      "supported_skills": [
+        "Python",
+        "NLP",
+        "Retrieval-Augmented Generation",
+        "Embeddings",
+        "Vector Search",
+        "Prompt Engineering",
+        "FastAPI",
+        "REST APIs",
+        "PostgreSQL",
+        "Docker",
+        "Model Evaluation"
+      ],
+      "provenance": {
+        "origin": "fictional_project_portfolio",
+        "fictional": true,
+        "data_classification": "synthetic"
+      },
+      "allowed_uses": [
+        "base_resume",
+        "project_swap",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter",
+        "skill_evidence"
+      ]
+    },
+    {
+      "evidence_id": "EV-PROJ-002",
+      "evidence_type": "project",
+      "source_file": "candidate/portfolio.json",
+      "source_record_id": "proj-retail-demand",
+      "claim": "ShelfSense Demand Forecaster used Python, SQL, pandas, NumPy, scikit-learn, and MLflow to lower holdout MAPE from 24.8% to 18.6% on synthetic retail data.",
+      "supported_skills": [
+        "Python",
+        "SQL",
+        "pandas",
+        "NumPy",
+        "scikit-learn",
+        "Time Series Forecasting",
+        "Model Evaluation",
+        "MLflow"
+      ],
+      "provenance": {
+        "origin": "fictional_project_portfolio",
+        "fictional": true,
+        "data_classification": "synthetic"
+      },
+      "allowed_uses": [
+        "base_resume",
+        "project_swap",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter",
+        "skill_evidence"
+      ]
+    },
+    {
+      "evidence_id": "EV-PROJ-003",
+      "evidence_type": "project",
+      "source_file": "candidate/portfolio.json",
+      "source_record_id": "proj-model-watch",
+      "claim": "ModelWatch Release Guard used Python, Bash, Docker, AWS, MLflow, pytest, Git, and CI/CD to detect eight of eight seeded regressions and reduce manual checks from 42 to 15 minutes.",
+      "supported_skills": [
+        "Python",
+        "Bash",
+        "AWS",
+        "MLOps",
+        "Docker",
+        "MLflow",
+        "Model Monitoring",
+        "CI/CD",
+        "Git",
+        "pytest",
+        "Model Evaluation"
+      ],
+      "provenance": {
+        "origin": "fictional_project_portfolio",
+        "fictional": true,
+        "measurement_context": "repeated seeded-regression trials"
+      },
+      "allowed_uses": [
+        "base_resume",
+        "project_swap",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter",
+        "skill_evidence"
+      ]
+    },
+    {
+      "evidence_id": "EV-PROJ-004",
+      "evidence_type": "project",
+      "source_file": "candidate/portfolio.json",
+      "source_record_id": "proj-vision-inspect",
+      "claim": "ForgeSight Defect Inspector used Python, PyTorch, computer vision, and Docker to reach 91% macro F1 and reduce manual review volume by 38% on held-out component images.",
+      "supported_skills": [
+        "Python",
+        "PyTorch",
+        "Computer Vision",
+        "Model Evaluation",
+        "Docker"
+      ],
+      "provenance": {
+        "origin": "fictional_project_portfolio",
+        "fictional": true,
+        "data_classification": "public non-identifying images"
+      },
+      "allowed_uses": [
+        "project_swap",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter",
+        "skill_evidence"
+      ]
+    },
+    {
+      "evidence_id": "EV-PROJ-005",
+      "evidence_type": "project",
+      "source_file": "candidate/portfolio.json",
+      "source_record_id": "proj-ledger-anomaly",
+      "claim": "LedgerLens Anomaly Triage used Python, SQL, pandas, scikit-learn, and FastAPI to place 76% of seeded anomalies in the top-ranked 10% of synthetic ledger transactions.",
+      "supported_skills": [
+        "Python",
+        "SQL",
+        "pandas",
+        "scikit-learn",
+        "Model Evaluation",
+        "FastAPI",
+        "REST APIs"
+      ],
+      "provenance": {
+        "origin": "fictional_project_portfolio",
+        "fictional": true,
+        "data_classification": "synthetic"
+      },
+      "allowed_uses": [
+        "project_swap",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter",
+        "skill_evidence"
+      ]
+    },
+    {
+      "evidence_id": "EV-PROJ-006",
+      "evidence_type": "project",
+      "source_file": "candidate/portfolio.json",
+      "source_record_id": "proj-grid-forecast",
+      "claim": "GridPulse Load Forecaster used Python, pandas, NumPy, scikit-learn, and MLflow to improve mean absolute error by 12% over a seasonal-naive baseline.",
+      "supported_skills": [
+        "Python",
+        "pandas",
+        "NumPy",
+        "scikit-learn",
+        "Time Series Forecasting",
+        "MLflow",
+        "Model Evaluation"
+      ],
+      "provenance": {
+        "origin": "fictional_project_portfolio",
+        "fictional": true,
+        "data_classification": "public aggregate time series"
+      },
+      "allowed_uses": [
+        "project_swap",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter",
+        "skill_evidence"
+      ]
+    },
+    {
+      "evidence_id": "EV-PROJ-007",
+      "evidence_type": "project",
+      "source_file": "candidate/portfolio.json",
+      "source_record_id": "proj-catalog-recs",
+      "claim": "CatalogCompass Recommender used Python, SQL, NumPy, pandas, and scikit-learn to raise recall at 10 from 0.31 to 0.39 on synthetic interaction data.",
+      "supported_skills": [
+        "Python",
+        "SQL",
+        "NumPy",
+        "pandas",
+        "scikit-learn",
+        "Model Evaluation"
+      ],
+      "provenance": {
+        "origin": "fictional_project_portfolio",
+        "fictional": true,
+        "data_classification": "synthetic"
+      },
+      "allowed_uses": [
+        "project_swap",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter",
+        "skill_evidence"
+      ]
+    },
+    {
+      "evidence_id": "EV-PROJ-008",
+      "evidence_type": "project",
+      "source_file": "candidate/portfolio.json",
+      "source_record_id": "proj-support-nlp",
+      "claim": "SupportSignal Intent Router used Python, PyTorch, Transformers, NLP, FastAPI, and Docker to achieve 88% macro F1 and sub-140 ms median local latency.",
+      "supported_skills": [
+        "Python",
+        "PyTorch",
+        "Transformers",
+        "NLP",
+        "FastAPI",
+        "REST APIs",
+        "Docker",
+        "Model Evaluation"
+      ],
+      "provenance": {
+        "origin": "fictional_project_portfolio",
+        "fictional": true,
+        "data_classification": "synthetic"
+      },
+      "allowed_uses": [
+        "project_swap",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter",
+        "skill_evidence"
+      ]
+    },
+    {
+      "evidence_id": "EV-SKILL-LANG",
+      "evidence_type": "master_skill",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "master_skills.languages",
+      "claim": "The supported programming and query languages are Python, SQL, and Bash.",
+      "supported_skills": [
+        "Python",
+        "SQL",
+        "Bash"
+      ],
+      "provenance": {
+        "origin": "derived_from_candidate_evidence",
+        "fictional": true,
+        "supporting_evidence_ids": [
+          "EV-EXP-BULLET-001",
+          "EV-EXP-BULLET-005",
+          "EV-PROJ-003"
+        ]
+      },
+      "allowed_uses": [
+        "skill_evidence",
+        "base_resume",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-SKILL-ML",
+      "evidence_type": "master_skill",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "master_skills.ml_and_data",
+      "claim": "The supported ML and data skills are scikit-learn, PyTorch, pandas, NumPy, NLP, Transformers, time series forecasting, computer vision, and model evaluation.",
+      "supported_skills": [
+        "scikit-learn",
+        "PyTorch",
+        "pandas",
+        "NumPy",
+        "NLP",
+        "Transformers",
+        "Time Series Forecasting",
+        "Computer Vision",
+        "Model Evaluation"
+      ],
+      "provenance": {
+        "origin": "derived_from_candidate_evidence",
+        "fictional": true,
+        "supporting_evidence_ids": [
+          "EV-EXP-BULLET-001",
+          "EV-EXP-BULLET-004",
+          "EV-PROJ-002",
+          "EV-PROJ-004",
+          "EV-PROJ-008"
+        ]
+      },
+      "allowed_uses": [
+        "skill_evidence",
+        "base_resume",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-SKILL-GENAI",
+      "evidence_type": "master_skill",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "master_skills.generative_ai",
+      "claim": "The supported generative AI skills are retrieval-augmented generation, embeddings, vector search, and prompt engineering.",
+      "supported_skills": [
+        "Retrieval-Augmented Generation",
+        "Embeddings",
+        "Vector Search",
+        "Prompt Engineering"
+      ],
+      "provenance": {
+        "origin": "derived_from_candidate_evidence",
+        "fictional": true,
+        "supporting_evidence_ids": [
+          "EV-EXP-BULLET-002",
+          "EV-PROJ-001"
+        ]
+      },
+      "allowed_uses": [
+        "skill_evidence",
+        "base_resume",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-SKILL-MLOPS",
+      "evidence_type": "master_skill",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "master_skills.cloud_and_mLOps",
+      "claim": "The supported cloud and MLOps skills are AWS, MLOps, Docker, MLflow, model monitoring, and CI/CD.",
+      "supported_skills": [
+        "AWS",
+        "MLOps",
+        "Docker",
+        "MLflow",
+        "Model Monitoring",
+        "CI/CD"
+      ],
+      "provenance": {
+        "origin": "derived_from_candidate_evidence",
+        "fictional": true,
+        "supporting_evidence_ids": [
+          "EV-EXP-BULLET-003",
+          "EV-PROJ-003"
+        ]
+      },
+      "allowed_uses": [
+        "skill_evidence",
+        "base_resume",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter"
+      ]
+    },
+    {
+      "evidence_id": "EV-SKILL-SYSTEMS",
+      "evidence_type": "master_skill",
+      "source_file": "candidate/profile.json",
+      "source_record_id": "master_skills.systems_and_tools",
+      "claim": "The supported systems and tools skills are FastAPI, REST APIs, Git, pytest, and PostgreSQL.",
+      "supported_skills": [
+        "FastAPI",
+        "REST APIs",
+        "Git",
+        "pytest",
+        "PostgreSQL"
+      ],
+      "provenance": {
+        "origin": "derived_from_candidate_evidence",
+        "fictional": true,
+        "supporting_evidence_ids": [
+          "EV-EXP-BULLET-002",
+          "EV-EXP-BULLET-003",
+          "EV-EXP-BULLET-005",
+          "EV-PROJ-001"
+        ]
+      },
+      "allowed_uses": [
+        "skill_evidence",
+        "base_resume",
+        "fit_analysis",
+        "tailored_resume",
+        "cover_letter"
+      ]
+    }
+  ]
+}

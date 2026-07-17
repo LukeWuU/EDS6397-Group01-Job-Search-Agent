@@ -1,0 +1,257 @@
+{
+  "schema_version": "1.0",
+  "candidate_id": "cand-mira-solenne-001",
+  "projects": [
+    {
+      "project_id": "proj-carepath-rag",
+      "name": "CarePath Evidence Navigator",
+      "year": 2025,
+      "domain": "Healthcare",
+      "industry": "Clinical Operations",
+      "short_description": "A citation-first retrieval system for searching synthetic care-protocol documents.",
+      "problem_solved": "Reduced time spent locating supporting passages across fragmented clinical operations guidance.",
+      "technology_stack": [
+        "Python",
+        "FastAPI",
+        "PostgreSQL",
+        "Embeddings",
+        "Vector Search",
+        "Docker"
+      ],
+      "skills_demonstrated": [
+        "Retrieval-Augmented Generation",
+        "NLP",
+        "Embeddings",
+        "Vector Search",
+        "Prompt Engineering",
+        "FastAPI",
+        "REST APIs",
+        "PostgreSQL",
+        "Docker",
+        "Model Evaluation"
+      ],
+      "measurable_result": "Retrieved a reviewer-approved supporting passage in the top three results for 87% of 120 synthetic evaluation questions.",
+      "evidence_ids": [
+        "EV-PROJ-001"
+      ],
+      "on_base_resume": true
+    },
+    {
+      "project_id": "proj-retail-demand",
+      "name": "ShelfSense Demand Forecaster",
+      "year": 2024,
+      "domain": "Retail and Supply Chain",
+      "industry": "Specialty Retail",
+      "short_description": "A weekly demand forecasting pipeline for synthetic store and product histories.",
+      "problem_solved": "Improved replenishment planning for products with seasonal and promotion-driven demand.",
+      "technology_stack": [
+        "Python",
+        "pandas",
+        "NumPy",
+        "scikit-learn",
+        "MLflow",
+        "SQL"
+      ],
+      "skills_demonstrated": [
+        "Python",
+        "SQL",
+        "pandas",
+        "NumPy",
+        "scikit-learn",
+        "Time Series Forecasting",
+        "Model Evaluation",
+        "MLflow"
+      ],
+      "measurable_result": "Lowered mean absolute percentage error from 24.8% to 18.6% on a twelve-week synthetic holdout set.",
+      "evidence_ids": [
+        "EV-PROJ-002"
+      ],
+      "on_base_resume": true
+    },
+    {
+      "project_id": "proj-model-watch",
+      "name": "ModelWatch Release Guard",
+      "year": 2025,
+      "domain": "Developer Productivity",
+      "industry": "Machine Learning Operations",
+      "short_description": "A lightweight release and monitoring workflow for containerized prediction services.",
+      "problem_solved": "Made model-quality regression and feature drift visible before and after deployment.",
+      "technology_stack": [
+        "Python",
+        "Bash",
+        "Docker",
+        "AWS",
+        "MLflow",
+        "pytest",
+        "Git",
+        "CI/CD"
+      ],
+      "skills_demonstrated": [
+        "Python",
+        "Bash",
+        "AWS",
+        "MLOps",
+        "Docker",
+        "MLflow",
+        "Model Monitoring",
+        "CI/CD",
+        "Git",
+        "pytest",
+        "Model Evaluation"
+      ],
+      "measurable_result": "Detected all eight seeded quality regressions and reduced manual release checks from 42 to 15 minutes in repeated trials.",
+      "evidence_ids": [
+        "EV-PROJ-003"
+      ],
+      "on_base_resume": true
+    },
+    {
+      "project_id": "proj-vision-inspect",
+      "name": "ForgeSight Defect Inspector",
+      "year": 2024,
+      "domain": "Manufacturing",
+      "industry": "Industrial Quality",
+      "short_description": "An image classifier for identifying surface defects in a public, non-identifying component-image dataset.",
+      "problem_solved": "Prioritized likely defective components for manual inspection.",
+      "technology_stack": [
+        "Python",
+        "PyTorch",
+        "Computer Vision",
+        "Docker"
+      ],
+      "skills_demonstrated": [
+        "Python",
+        "PyTorch",
+        "Computer Vision",
+        "Model Evaluation",
+        "Docker"
+      ],
+      "measurable_result": "Reached 91% macro F1 on a held-out test split and cut review volume by 38% at the selected threshold.",
+      "evidence_ids": [
+        "EV-PROJ-004"
+      ],
+      "on_base_resume": false
+    },
+    {
+      "project_id": "proj-ledger-anomaly",
+      "name": "LedgerLens Anomaly Triage",
+      "year": 2023,
+      "domain": "Financial Services",
+      "industry": "Accounting Technology",
+      "short_description": "An explainable anomaly-ranking workflow for synthetic general-ledger transactions.",
+      "problem_solved": "Helped reviewers prioritize unusual entries without presenting the model as a fraud determination.",
+      "technology_stack": [
+        "Python",
+        "SQL",
+        "pandas",
+        "scikit-learn",
+        "FastAPI"
+      ],
+      "skills_demonstrated": [
+        "Python",
+        "SQL",
+        "pandas",
+        "scikit-learn",
+        "Model Evaluation",
+        "FastAPI",
+        "REST APIs"
+      ],
+      "measurable_result": "Placed 76% of seeded anomalies in the highest-ranked 10% of transactions on the synthetic test set.",
+      "evidence_ids": [
+        "EV-PROJ-005"
+      ],
+      "on_base_resume": false
+    },
+    {
+      "project_id": "proj-grid-forecast",
+      "name": "GridPulse Load Forecaster",
+      "year": 2025,
+      "domain": "Energy",
+      "industry": "Utility Analytics",
+      "short_description": "A short-horizon load forecasting study using public weather and power-demand series.",
+      "problem_solved": "Compared reproducible forecasting baselines for day-ahead operational planning.",
+      "technology_stack": [
+        "Python",
+        "pandas",
+        "NumPy",
+        "scikit-learn",
+        "MLflow"
+      ],
+      "skills_demonstrated": [
+        "Python",
+        "pandas",
+        "NumPy",
+        "scikit-learn",
+        "Time Series Forecasting",
+        "MLflow",
+        "Model Evaluation"
+      ],
+      "measurable_result": "Improved mean absolute error by 12% over a seasonal-naive baseline across four rolling validation windows.",
+      "evidence_ids": [
+        "EV-PROJ-006"
+      ],
+      "on_base_resume": false
+    },
+    {
+      "project_id": "proj-catalog-recs",
+      "name": "CatalogCompass Recommender",
+      "year": 2023,
+      "domain": "Retail and Supply Chain",
+      "industry": "Digital Commerce",
+      "short_description": "A hybrid product recommender evaluated on synthetic customer interactions and item metadata.",
+      "problem_solved": "Improved discovery for low-interaction products while retaining transparent offline evaluation.",
+      "technology_stack": [
+        "Python",
+        "NumPy",
+        "pandas",
+        "scikit-learn",
+        "SQL"
+      ],
+      "skills_demonstrated": [
+        "Python",
+        "SQL",
+        "NumPy",
+        "pandas",
+        "scikit-learn",
+        "Model Evaluation"
+      ],
+      "measurable_result": "Raised recall at 10 from 0.31 to 0.39 versus a popularity baseline on the synthetic evaluation set.",
+      "evidence_ids": [
+        "EV-PROJ-007"
+      ],
+      "on_base_resume": false
+    },
+    {
+      "project_id": "proj-support-nlp",
+      "name": "SupportSignal Intent Router",
+      "year": 2024,
+      "domain": "Enterprise Knowledge Systems",
+      "industry": "Business Software",
+      "short_description": "A transformer-based classifier and API for routing synthetic internal support requests.",
+      "problem_solved": "Reduced manual first-pass categorization of incoming support text.",
+      "technology_stack": [
+        "Python",
+        "PyTorch",
+        "Transformers",
+        "NLP",
+        "FastAPI",
+        "Docker"
+      ],
+      "skills_demonstrated": [
+        "Python",
+        "PyTorch",
+        "Transformers",
+        "NLP",
+        "FastAPI",
+        "REST APIs",
+        "Docker",
+        "Model Evaluation"
+      ],
+      "measurable_result": "Achieved 88% macro F1 across six synthetic intent classes and served predictions below 140 ms median latency in local tests.",
+      "evidence_ids": [
+        "EV-PROJ-008"
+      ],
+      "on_base_resume": false
+    }
+  ]
+}
