@@ -70,8 +70,26 @@ class ScriptedClient:
                 "client_id": id(self),
             }
         )
-        if messages and "resume_revision_request" in messages[-1].get("content", ""):
-            self.revision_saw_memory = "Kubernetes" in messages[-1]["content"]
+        if messages:
+            content = messages[-1].get("content", "")
+            try:
+                payload = json.loads(content)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("type") == "workflow_checkpoint":
+                contract = payload.get("next_action_contract", {})
+                if contract.get("phase") == "resume_revision":
+                    target_context = payload.get("target_context") or contract.get(
+                        "target_context"
+                    )
+                    if isinstance(target_context, dict):
+                        memory_facts = target_context.get("current_memory_facts", [])
+                        self.revision_saw_memory = any(
+                            "Kubernetes" in str(fact.get("normalized_value", ""))
+                            or "Kubernetes" in str(fact.get("statement", ""))
+                            for fact in memory_facts
+                            if isinstance(fact, dict)
+                        )
         if not self.responses:
             raise AssertionError("Scripted client exhausted")
         return self.responses.pop(0)
@@ -440,9 +458,10 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
         ["generate_cover_letter"],
         ["generate_cover_letter"],
     ]
-    assert [call["message_count"] for call in client.calls] == sorted(
-        call["message_count"] for call in client.calls
-    )
+    message_counts = [call["message_count"] for call in client.calls]
+    assert message_counts[:5] == sorted(message_counts[:5])
+    assert message_counts[5] == 2
+    assert all(count <= 14 for count in message_counts)
     assert runtime.state is not None
     assert runtime.state.consecutive_invalid_call_count == 0
     first_recovery = json.loads(client.calls[6]["messages"][-1]["content"])
@@ -502,22 +521,17 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     assert first_tailoring_context["project_swap"] is None
     assert scores[1].job_id not in json.dumps(first_tailoring_context)
     assert scores[2].job_id not in json.dumps(first_tailoring_context)
-    fit_tool_messages = [
-        json.loads(message["content"])
-        for message in client.calls[5]["messages"]
-        if message.get("role") == "tool"
-        and message.get("tool_name") == "analyze_fit"
-    ]
-    assert len(fit_tool_messages) == 3
-    assert {item["job_id"] for item in fit_tool_messages} == {
-        score.job_id for score in scores
-    }
-    for compact in fit_tool_messages:
-        assert "formatted_text" not in compact
-        assert "core_skills" not in compact
-        assert "tailoring_actions" not in compact
-        assert "aligned_skills" in compact
-        assert "relevant_evidence_ids" in compact
+    first_tailoring_messages = client.calls[5]["messages"]
+    assert first_tailoring_messages[0]["role"] == "system"
+    tailoring_checkpoint = json.loads(first_tailoring_messages[1]["content"])
+    assert tailoring_checkpoint["type"] == "workflow_checkpoint"
+    assert "current_state" not in json.dumps(first_tailoring_messages)
+    assert "exact_tailor_resume_structural_template" not in json.dumps(
+        tailoring_checkpoint
+    )
+    assert len(json.dumps(first_tailoring_messages)) < len(
+        json.dumps(client.calls[4]["messages"])
+    )
     assert set(runtime.state.fit_analyses) == {score.job_id for score in scores}
     assert runtime.registry is not None
     assert len(runtime.registry.model_schemas()) == 5
@@ -601,6 +615,11 @@ def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
             "experience_bullet_edits"
         ]
     ) == 2
+    assert "exact_tailor_resume_structural_template" not in first_contract
+    plan_limits = " ".join(first_contract["constraints"])
+    assert "at most 55 words" in plan_limits
+    assert "at most 32 words" in plan_limits
+    assert "Exactly two different experience_bullet_edits" in plan_limits
     safety_contract = " ".join(first_contract["constraints"])
     assert "job_posting citation supports relevance only" in safety_contract
     assert "candidate-side evidence" in safety_contract
@@ -881,3 +900,135 @@ def test_model_transport_failure_flushes_private_trace_without_outputs_or_memory
         "Agent phase: filtering",
         "Model call 1/40: waiting for qwen3:8b",
     ]
+
+
+def test_tailoring_compaction_keeps_target_context_and_drops_obsolete_history(
+    tmp_path,
+):
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.state is not None
+    ids = runtime.state.top_3_job_ids
+    for index in range(6):
+        runtime.conversation.append(
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "type": "current_state",
+                        "state": runtime.state.snapshot(),
+                        "obsolete": "x" * 4000,
+                    }
+                ),
+            }
+        )
+        runtime.conversation.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+            }
+        )
+    full_size = len(json.dumps(runtime.conversation))
+    contract = runtime._next_action_contract()
+    runtime._apply_conversation_checkpoint(contract)
+    compact_size = len(json.dumps(runtime.conversation))
+    checkpoint = json.loads(runtime.conversation[1]["content"])
+
+    assert runtime.conversation[0]["role"] == "system"
+    assert len(runtime.conversation) == 2
+    assert checkpoint["type"] == "workflow_checkpoint"
+    assert checkpoint["target_context"]["target_job_id"] == ids[0]
+    assert "editable_experience_bullets" in checkpoint["target_context"]
+    assert ids[1] not in json.dumps(checkpoint["target_context"])
+    assert "current_state" not in json.dumps(runtime.conversation)
+    assert compact_size < full_size * 0.5
+
+
+def test_exact_structural_template_is_recovery_only(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.state is not None
+    ids = runtime.state.top_3_job_ids
+    contract = runtime._next_action_contract()
+
+    runtime._append_invalid_message(
+        None,
+        "Model response reached the generation limit before completing a tool call",
+        contract,
+    )
+    length_payload = json.loads(runtime.conversation[-1]["content"])
+    assert "exact_tailor_resume_structural_template" not in length_payload
+
+    generic_call = _tool(
+        "tailor_resume",
+        {
+            "decision_summary": "bad",
+            "job_id": ids[0],
+            "edit_plan": {
+                "education": [],
+                "experience": [],
+                "projects": [],
+                "skills": [],
+            },
+        },
+        99,
+    )
+    runtime._append_invalid_message(generic_call, "Invalid shape", contract)
+    recovery_payload = json.loads(runtime.conversation[-1]["content"])
+    assert "exact_tailor_resume_structural_template" in recovery_payload
+    template = recovery_payload["exact_tailor_resume_structural_template"]
+    assert template["job_id"] == ids[0]
+    assert template["edit_plan"]["job_id"] == ids[0]
+
+
+def test_length_limited_empty_response_is_invalid_without_side_effects(
+    tmp_path,
+):
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.state is not None
+    contract = runtime._next_action_contract()
+    memory_before = _hash(runtime.memory_path)
+    progress: list[str] = []
+    runtime.progress_callback = progress.append
+    runtime.state.model_call_count = 6
+    response = NormalizedAssistantMessage(
+        content="",
+        tool_calls=[],
+        done_reason="length",
+        eval_count=2048,
+    )
+
+    tool_history_before = len(runtime.state.tool_execution_history)
+    invalid_before = len(runtime.state.invalid_tool_attempts)
+
+    valid, invalid = runtime._execute_response_calls(response, contract)
+
+    assert valid == 0
+    assert invalid == 1
+    assert len(runtime.state.draft_resumes) == 0
+    assert len(runtime.state.tool_execution_history) == tool_history_before
+    assert len(runtime.state.invalid_tool_attempts) == invalid_before + 1
+    assert _hash(runtime.memory_path) == memory_before
+    assert runtime.state.invalid_tool_attempts[-1].error.startswith(
+        "Model response reached the generation limit"
+    )
+    assert "Model call 6: no complete tool call returned" in progress
+    assert "Model completion: length limit" in progress
+    assert "decision_summary" not in "\n".join(progress)
+
+
+def test_cover_letter_contract_includes_concise_limits(tmp_path):
+    from types import SimpleNamespace
+
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.state is not None
+    runtime.state.human_review = SimpleNamespace(completed=True)
+    runtime.state.finalized_resumes = {
+        job_id: SimpleNamespace(approved_revision_round=0)
+        for job_id in runtime.state.top_3_job_ids
+    }
+    contract = runtime._next_action_contract()
+    assert contract["allowed_tool"] == "generate_cover_letter"
+    limits = " ".join(contract["constraints"])
+    assert "at most 90 words" in limits
+    assert "at most 15 words" in limits
+    assert contract["target_context"]["approved_resume_revision"] == 0

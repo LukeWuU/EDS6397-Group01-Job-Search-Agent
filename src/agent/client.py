@@ -49,6 +49,9 @@ class NormalizedAssistantMessage(BaseModel):
 
     content: str = ""
     tool_calls: list[NormalizedToolCall] = Field(default_factory=list)
+    done_reason: str | None = None
+    prompt_eval_count: int | None = None
+    eval_count: int | None = None
 
 
 @runtime_checkable
@@ -129,7 +132,22 @@ def normalize_assistant_message(response: Any) -> NormalizedAssistantMessage:
                 ),
             )
         )
-    return NormalizedAssistantMessage(content=content, tool_calls=normalized_calls)
+    done_reason = _get_value(response, "done_reason")
+    if done_reason is not None and not isinstance(done_reason, str):
+        done_reason = str(done_reason)
+    prompt_eval_count = _get_value(response, "prompt_eval_count")
+    if prompt_eval_count is not None and not isinstance(prompt_eval_count, int):
+        prompt_eval_count = int(prompt_eval_count)
+    eval_count = _get_value(response, "eval_count")
+    if eval_count is not None and not isinstance(eval_count, int):
+        eval_count = int(eval_count)
+    return NormalizedAssistantMessage(
+        content=content,
+        tool_calls=normalized_calls,
+        done_reason=done_reason,
+        prompt_eval_count=prompt_eval_count,
+        eval_count=eval_count,
+    )
 
 
 class OllamaChatModelClient:

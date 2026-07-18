@@ -110,8 +110,40 @@ TAILOR_RESUME_CONSTRAINTS = [
     "Protected resume regions must remain unchanged.",
 ]
 
+TAILOR_RESUME_PLAN_LIMITS = [
+    "professional_summary.new_text: at most 55 words",
+    "each experience_bullet_edits[].new_text: at most 32 words",
+    "each reason: at most 18 words",
+    "plan_rationale: at most 25 words",
+    "Exactly two different experience_bullet_edits are required.",
+    "Use the minimum sufficient citations.",
+    (
+        "Summary must include one job_posting citation and at least one "
+        "candidate-side citation."
+    ),
+    (
+        "Each edited bullet must include at least one candidate-side citation."
+    ),
+    "skill_section_edits must be [] when no valid edit is needed.",
+    "Return exactly one tool call with no prose outside the tool call.",
+]
+
+COVER_LETTER_PLAN_LIMITS = [
+    "company_hook_phrase: at most 15 words",
+    "each body_paragraphs[].text: at most 90 words",
+    "each body_paragraphs[].reason: at most 18 words",
+    "closing_sentence: at most 25 words",
+    "plan_rationale: at most 25 words",
+    "Include between 3 and 8 skills.",
+    "Use the minimum sufficient citations.",
+    "Every paragraph and skill requires candidate-side evidence citations.",
+    "Return exactly one tool call with no prose outside the tool call.",
+]
+
 __all__ = [
     "SYSTEM_PROMPT",
     "TAILOR_RESUME_ARGUMENT_TEMPLATE",
     "TAILOR_RESUME_CONSTRAINTS",
+    "TAILOR_RESUME_PLAN_LIMITS",
+    "COVER_LETTER_PLAN_LIMITS",
 ]

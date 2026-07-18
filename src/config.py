@@ -15,7 +15,7 @@ class AppConfig(BaseModel):
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "qwen3:8b"
     ollama_num_ctx: int = 8192
-    ollama_num_predict: int = 1024
+    ollama_num_predict: int = 2048
     ollama_request_timeout_seconds: float = 600.0
     ollama_temperature: float = 0.0
     ollama_keep_alive: str = "10m"

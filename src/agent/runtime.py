@@ -17,9 +17,11 @@ from src.agent.client import (
     OllamaChatModelClient,
 )
 from src.agent.prompts import (
+    COVER_LETTER_PLAN_LIMITS,
     SYSTEM_PROMPT,
     TAILOR_RESUME_ARGUMENT_TEMPLATE,
     TAILOR_RESUME_CONSTRAINTS,
+    TAILOR_RESUME_PLAN_LIMITS,
 )
 from src.agent.state import (
     AgentPhase,
@@ -118,6 +120,114 @@ class JobSearchAgentRuntime:
         self._requested_tool_call_count = 0
         self._last_invalid_signature: str | None = None
         self._output_folders: dict[str, Path] = {}
+        self._conversation_compacted = False
+
+    @staticmethod
+    def _phase_needs_compaction(phase: str) -> bool:
+        return phase in {"resume_tailoring", "resume_revision", "cover_letter"}
+
+    def _contract_for_model(self, contract: dict[str, Any]) -> dict[str, Any]:
+        """Return a model-facing contract without recovery-only fields."""
+        return {
+            key: value
+            for key, value in contract.items()
+            if key != "exact_tailor_resume_structural_template"
+        }
+
+    def _build_workflow_checkpoint(self, contract: dict[str, Any]) -> dict[str, Any]:
+        assert self.state is not None
+        state = self.state
+        completed_phases: list[str] = []
+        if state.filtering_result is not None:
+            completed_phases.append("filtering")
+        if state.scoring_result is not None:
+            completed_phases.append("scoring")
+        if state.fit_analyses:
+            completed_phases.append("fit_analysis")
+        if state.draft_resumes:
+            completed_phases.append("resume_tailoring")
+        if state.human_review is not None:
+            completed_phases.append("human_review")
+        if state.cover_letters:
+            completed_phases.append("cover_letter")
+
+        checkpoint: dict[str, Any] = {
+            "type": "workflow_checkpoint",
+            "completed_phases": completed_phases,
+            "filtered": state.filtering_result is not None,
+            "scored": state.scoring_result is not None,
+            "top_3_job_ids": list(state.top_3_job_ids),
+            "top_3_ranks": {
+                job_id: self._target_rank(job_id) for job_id in state.top_3_job_ids
+            },
+            "fit_analysis_job_ids": list(state.fit_analyses),
+            "draft_resume_job_ids": list(state.draft_resumes),
+            "finalized_resume_job_ids": list(state.finalized_resumes),
+            "cover_letter_job_ids": list(state.cover_letters),
+            "human_review_completed": bool(
+                state.human_review and state.human_review.completed
+            ),
+            "pause_count": state.pause_count,
+            "next_action_contract": self._contract_for_model(contract),
+            "instruction": [
+                "Return exactly one tool call.",
+                "Do not return prose-only content.",
+                "Do not call a different tool.",
+                "Do not target another job.",
+            ],
+        }
+        target_context = contract.get("target_context")
+        if target_context is not None:
+            checkpoint["target_context"] = target_context
+        return checkpoint
+
+    def _apply_conversation_checkpoint(self, contract: dict[str, Any]) -> None:
+        self.conversation = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    self._build_workflow_checkpoint(contract),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            },
+        ]
+        self._conversation_compacted = True
+
+    def _empty_tool_call_error(
+        self,
+        response: NormalizedAssistantMessage,
+    ) -> tuple[str, bool]:
+        if (
+            not response.tool_calls
+            and response.done_reason
+            and "length" in response.done_reason.casefold()
+        ):
+            return (
+                "Model response reached the generation limit before completing "
+                "a tool call",
+                True,
+            )
+        return (
+            "Exactly one tool call is required; received "
+            f"{len(response.tool_calls)}",
+            False,
+        )
+
+    def _report_no_tool_call_progress(
+        self,
+        response: NormalizedAssistantMessage,
+        *,
+        length_limited: bool,
+    ) -> None:
+        assert self.state is not None
+        self._report_progress(
+            f"Model call {self.state.model_call_count}: "
+            "no complete tool call returned"
+        )
+        if length_limited:
+            self._report_progress("Model completion: length limit")
 
     @property
     def model_name(self) -> str:
@@ -274,6 +384,66 @@ class JobSearchAgentRuntime:
             "revision_feedback": revision_feedback,
         }
 
+    def _cover_letter_context(self, job_id: str) -> dict[str, Any]:
+        assert self.state is not None
+        assert self.registry is not None
+        analysis = self.state.fit_analyses[job_id]
+        job = self.registry._job(job_id)
+        finalized = self.state.finalized_resumes[job_id]
+        return {
+            "target_job_id": job_id,
+            "rank": self._target_rank(job_id),
+            "title": job.title,
+            "company": job.company,
+            "aligned_skills": analysis.core_skills.aligned_skills,
+            "evidenced_elsewhere_skills": (
+                analysis.core_skills.evidenced_elsewhere_skills
+            ),
+            "genuine_gaps": analysis.core_skills.genuine_gaps,
+            "approved_resume_revision": finalized.approved_revision_round,
+            "current_memory_facts": [
+                {
+                    "fact_id": fact.fact_id,
+                    "fact_type": fact.fact_type,
+                    "statement": fact.statement,
+                    "normalized_value": fact.normalized_value,
+                    "skill_tags": fact.skill_tags,
+                }
+                for fact in self.registry.memory.facts
+            ],
+            "relevant_evidence_ids": self._evidence_ids(analysis),
+        }
+
+    @staticmethod
+    def _concise_tailor_required_shape(
+        target_job_id: str,
+        *,
+        expected_swap,
+    ) -> dict[str, Any]:
+        project_swap: dict[str, Any] | None = None
+        if expected_swap is not None:
+            project_swap = {
+                "remove_project_id": expected_swap.remove_project_id,
+                "add_project_id": expected_swap.add_project_id,
+                "reason": "<reason>",
+                "citations": ["<target-specific citations>"],
+            }
+        return {
+            "decision_summary": "<concise explanation>",
+            "job_id": target_job_id,
+            "edit_plan": {
+                "job_id": target_job_id,
+                "professional_summary": "<SummaryEdit with citations>",
+                "experience_bullet_edits": [
+                    "<ExperienceBulletEdit>",
+                    "<different ExperienceBulletEdit>",
+                ],
+                "skill_section_edits": [],
+                "project_swap": project_swap,
+                "plan_rationale": "<concise rationale>",
+            },
+        }
+
     def _next_action_contract(
         self,
         *,
@@ -361,34 +531,16 @@ class JobSearchAgentRuntime:
             }
         elif allowed_tool == "tailor_resume":
             assert target_job_id is not None
-            required_shape = copy.deepcopy(TAILOR_RESUME_ARGUMENT_TEMPLATE)
-            required_shape["job_id"] = target_job_id
-            required_shape["edit_plan"]["job_id"] = target_job_id
             analysis = state.fit_analyses[target_job_id]
             expected_swap = analysis.projects.swap_suggestion
-            if expected_swap is not None:
-                required_shape["edit_plan"]["project_swap"] = {
-                    "remove_project_id": expected_swap.remove_project_id,
-                    "add_project_id": expected_swap.add_project_id,
-                    "reason": expected_swap.reason,
-                    "citations": [
-                        *(
-                            citation.model_dump(mode="json")
-                            for citation in expected_swap.citations
-                        ),
-                        {
-                            "source_type": "fit_analysis",
-                            "source_id": target_job_id,
-                            "source_field": "projects.swap_suggestion",
-                            "evidence_id": None,
-                            "supported_claim": expected_swap.reason,
-                        },
-                    ],
-                }
+            required_shape = self._concise_tailor_required_shape(
+                target_job_id,
+                expected_swap=expected_swap,
+            )
             constraints = [
                 item.replace("TARGET_JOB_ID", target_job_id)
                 for item in TAILOR_RESUME_CONSTRAINTS
-            ]
+            ] + list(TAILOR_RESUME_PLAN_LIMITS)
             target_context = self._tailoring_context(
                 target_job_id,
                 revision_feedback=revision_feedback,
@@ -400,22 +552,19 @@ class JobSearchAgentRuntime:
                 "job_id": target_job_id,
                 "plan": {
                     "job_id": target_job_id,
-                    "<remaining CoverLetterPlan fields>": (
-                        "<evidence-grounded values>"
-                    ),
+                    "company_hook_phrase": "<evidence-grounded hook>",
+                    "company_hook_source_field": "<job field>",
+                    "body_paragraphs": ["<1 or 2 CoverLetterParagraph>"],
+                    "skills": ["<3 to 8 CoverLetterSkillItem>"],
+                    "closing_sentence": "<concise closing>",
+                    "plan_rationale": "<concise rationale>",
                 },
             }
             constraints = [
                 "Outer job_id and plan.job_id must equal the target_job_id.",
                 "Use only candidate-side evidence for candidate claims.",
-            ]
-            job = self.registry._job(target_job_id)
-            target_context = {
-                "target_job_id": target_job_id,
-                "rank": self._target_rank(target_job_id),
-                "title": job.title,
-                "company": job.company,
-            }
+            ] + list(COVER_LETTER_PLAN_LIMITS)
+            target_context = self._cover_letter_context(target_job_id)
 
         return {
             "phase": phase,
@@ -425,11 +574,6 @@ class JobSearchAgentRuntime:
             "initial_draft": initial_draft,
             "revision_round": revision_round if revision_job_id else None,
             "required_argument_shape": required_shape,
-            "exact_tailor_resume_structural_template": (
-                TAILOR_RESUME_ARGUMENT_TEMPLATE
-                if allowed_tool == "tailor_resume"
-                else None
-            ),
             "constraints": constraints,
             "target_context": target_context,
         }
@@ -554,7 +698,10 @@ class JobSearchAgentRuntime:
                 break
             contract = self._next_action_contract()
             if not self._conversation_ends_with_invalid_recovery():
-                self._append_state_snapshot(contract)
+                if self._phase_needs_compaction(contract["phase"]):
+                    self._apply_conversation_checkpoint(contract)
+                else:
+                    self._append_state_snapshot(contract)
             response = self._call_model(self.trace, contract)
             self._append_assistant_message(response)
             valid_count, invalid_count = self._execute_response_calls(
@@ -688,11 +835,13 @@ class JobSearchAgentRuntime:
         if self._requested_tool_call_count > MAX_TOOL_CALLS:
             raise AgentLoopLimitError("Maximum requested tool-call count reached")
         if len(response.tool_calls) != 1:
-            error = (
-                "Exactly one tool call is required; received "
-                f"{len(response.tool_calls)}"
-            )
+            error, length_limited = self._empty_tool_call_error(response)
             call = response.tool_calls[0] if response.tool_calls else None
+            if not response.tool_calls:
+                self._report_no_tool_call_progress(
+                    response,
+                    length_limited=length_limited,
+                )
             self._record_invalid(tool_call=call, error=error)
             self._append_invalid_message(call, error, contract)
             return 0, 1
@@ -943,17 +1092,15 @@ class JobSearchAgentRuntime:
         contract: dict[str, Any],
     ) -> None:
         assert self.state is not None
-        payload = {
+        diagnostics = self._argument_diagnostics(tool_call, contract)
+        payload: dict[str, Any] = {
             "status": "invalid_tool_call",
             "requested_tool": tool_call.name if tool_call else None,
             "error": error[:2000],
-            "field_diagnostics": self._argument_diagnostics(tool_call, contract),
+            "field_diagnostics": diagnostics,
             "target_job_id": contract.get("target_job_id"),
             "allowed_tool": contract["allowed_tool"],
             "required_argument_shape": contract["required_argument_shape"],
-            "exact_tailor_resume_structural_template": contract.get(
-                "exact_tailor_resume_structural_template"
-            ),
             "target_context": contract.get("target_context"),
             "constraints": contract["constraints"],
             "instruction": [
@@ -964,6 +1111,27 @@ class JobSearchAgentRuntime:
                 "Correct every missing, extra, or misplaced field exactly.",
             ],
         }
+        structural_missing = [
+            field
+            for field in diagnostics["missing_fields"]
+            if field != "tool_call"
+        ]
+        structure_issues = (
+            contract["allowed_tool"] == "tailor_resume"
+            and (
+                structural_missing
+                or diagnostics["extra_fields"]
+                or diagnostics["misplaced_fields"]
+                or diagnostics["replacement_schema_keys"]
+            )
+        )
+        if structure_issues:
+            target_job_id = contract.get("target_job_id")
+            template = copy.deepcopy(TAILOR_RESUME_ARGUMENT_TEMPLATE)
+            if target_job_id:
+                template["job_id"] = target_job_id
+                template["edit_plan"]["job_id"] = target_job_id
+            payload["exact_tailor_resume_structural_template"] = template
         self.conversation.append(
             {
                 "role": "tool" if tool_call else "user",
@@ -1140,27 +1308,7 @@ class JobSearchAgentRuntime:
             revision_round=next_revision_round,
             revision_feedback=review_comments,
         )
-        self.conversation.append(
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "type": "resume_revision_request",
-                        "job_id": job_id,
-                        "required_revision_round": next_revision_round,
-                        "exact_review_feedback": review_comments,
-                        "next_action_contract": contract,
-                        "instruction": [
-                            "Return exactly one tailor_resume tool call.",
-                            "Do not return prose-only content.",
-                            "Do not target another job.",
-                        ],
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-            }
-        )
+        self._apply_conversation_checkpoint(contract)
         invalid_turns = 0
         while True:
             response = self._call_model(trace_parent, contract)
@@ -1171,10 +1319,22 @@ class JobSearchAgentRuntime:
                     "Maximum requested tool-call count reached"
                 )
             if len(response.tool_calls) != 1:
-                error = (
-                    "A review revision response must contain exactly one "
-                    "tailor_resume call"
-                )
+                error, length_limited = self._empty_tool_call_error(response)
+                if not response.tool_calls:
+                    self._report_no_tool_call_progress(
+                        response,
+                        length_limited=length_limited,
+                    )
+                    if length_limited:
+                        error = (
+                            "Model response reached the generation limit "
+                            "before completing a tool call"
+                        )
+                    else:
+                        error = (
+                            "A review revision response must contain exactly "
+                            "one tailor_resume call"
+                        )
                 call = response.tool_calls[0] if response.tool_calls else None
                 self._record_invalid(tool_call=call, error=error)
                 self._append_invalid_message(call, error, contract)

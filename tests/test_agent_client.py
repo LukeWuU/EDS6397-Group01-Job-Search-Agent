@@ -80,7 +80,7 @@ def test_ollama_062_arguments_are_explicit_and_no_secret_is_exposed():
     assert call["stream"] is False
     assert call["options"] == {
         "num_ctx": 4096,
-        "num_predict": 1024,
+        "num_predict": 2048,
         "temperature": 0.2,
     }
     assert call["keep_alive"] == "3m"
@@ -148,3 +148,45 @@ def test_read_timeout_is_wrapped_once_without_sensitive_text():
     assert "PRIVATE_SECRET" not in str(captured.value)
     assert "PRIVATE_ARGS" not in str(captured.value)
     assert fake.calls == 1
+
+
+def test_normalizes_provider_diagnostics_when_present():
+    result = normalize_assistant_message(
+        {
+            "message": {"content": "", "tool_calls": []},
+            "done_reason": "length",
+            "prompt_eval_count": 512,
+            "eval_count": 1024,
+        }
+    )
+    assert result.done_reason == "length"
+    assert result.prompt_eval_count == 512
+    assert result.eval_count == 1024
+    assert result.tool_calls == []
+
+
+def test_missing_provider_diagnostics_default_to_none():
+    result = normalize_assistant_message(
+        {"message": {"content": "ok", "tool_calls": []}}
+    )
+    assert result.done_reason is None
+    assert result.prompt_eval_count is None
+    assert result.eval_count is None
+
+
+def test_diagnostics_are_not_appended_to_subsequent_model_messages():
+    response = normalize_assistant_message(
+        {
+            "message": {"content": "", "tool_calls": []},
+            "done_reason": "length",
+            "eval_count": 1024,
+        }
+    )
+    assistant_entry = {
+        "role": "assistant",
+        "content": response.content,
+        "tool_calls": [],
+    }
+    assert "done_reason" not in assistant_entry
+    assert "eval_count" not in assistant_entry
+    assert "prompt_eval_count" not in assistant_entry

@@ -41,7 +41,7 @@ def test_documented_defaults_without_env_overrides(monkeypatch: pytest.MonkeyPat
     assert config.ollama_host == "http://localhost:11434"
     assert config.ollama_model == "qwen3:8b"
     assert config.ollama_num_ctx == 8192
-    assert config.ollama_num_predict == 1024
+    assert config.ollama_num_predict == 2048
     assert config.ollama_request_timeout_seconds == 600.0
     assert config.ollama_temperature == 0.0
     assert config.ollama_keep_alive == "10m"
@@ -87,7 +87,7 @@ def test_env_example_documents_safe_public_trace_default() -> None:
     assert "LANGFUSE_PUBLIC_TRACE=false" in example
     assert "LANGFUSE_PUBLIC_KEY=\n" in example
     assert "LANGFUSE_SECRET_KEY=\n" in example
-    assert "OLLAMA_NUM_PREDICT=1024" in example
+    assert "OLLAMA_NUM_PREDICT=2048" in example
     assert "OLLAMA_REQUEST_TIMEOUT_SECONDS=600" in example
 
 
