@@ -11,8 +11,10 @@ import pytest
 
 from src.agent.client import NormalizedAssistantMessage, NormalizedToolCall
 from src.agent.runtime import AgentLoopLimitError, JobSearchAgentRuntime
+from src.agent.state import AgentPhase, StateInvariantError
+from src.agent.tool_registry import ToolArgumentsError
 from src.config import AppConfig
-from src.observability.tracing import LangfuseAgentTracer
+from src.observability.tracing import LangfuseAgentTracer, NoOpAgentTracer
 from src.services.candidate_loader import load_candidate_bundle
 from src.services.jobs_loader import load_jobs
 from src.services.memory_loader import load_memory
@@ -142,104 +144,157 @@ def _workflow_plans():
     return bundle, scores, resume_plans, cover_plans
 
 
-def _responses(scores, resume_plans, cover_plans, *, early_invalid=False):
+def _responses(
+    scores,
+    resume_plans,
+    cover_plans,
+    *,
+    malformed_tailoring=False,
+):
     ids = [item.job_id for item in scores]
-    responses = []
-    if early_invalid:
-        responses.append(
-            NormalizedAssistantMessage(
-                tool_calls=[
-                    _tool(
-                        "score_jobs",
-                        {"decision_summary": "Score before filtering."},
-                        0,
-                    )
-                ]
-            )
+    responses = [
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "filter_jobs",
+                    {"decision_summary": "Filter all loaded jobs exactly once."},
+                    1,
+                )
+            ]
+        ),
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "score_jobs",
+                    {
+                        "decision_summary": (
+                            "Ask Python to score only accepted jobs and select Top 3."
+                        )
+                    },
+                    2,
+                )
+            ]
+        ),
+    ]
+    responses.extend(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "analyze_fit",
+                    {
+                        "job_id": job_id,
+                        "decision_summary": f"Analyze Top 3 job {job_id}.",
+                    },
+                    10 + index,
+                )
+            ]
+        )
+        for index, job_id in enumerate(ids)
+    )
+    if malformed_tailoring:
+        responses.extend(
+            [
+                NormalizedAssistantMessage(
+                    tool_calls=[
+                        _tool(
+                            "tailor_resume",
+                            {
+                                "decision_summary": "Use an incorrect generic plan.",
+                                "job_id": ids[0],
+                                "edit_plan": {
+                                    "education": [],
+                                    "experience": [],
+                                    "projects": [],
+                                    "skills": [],
+                                },
+                            },
+                            20,
+                        )
+                    ]
+                ),
+                NormalizedAssistantMessage(
+                    tool_calls=[
+                        _tool(
+                            "tailor_resume",
+                            {
+                                "decision_summary": "Use incorrect flattened fields.",
+                                "job_id": ids[0],
+                                "edit_plan": {
+                                    "job_id": ids[0],
+                                    "professional_summary": resume_plans[
+                                        ids[0]
+                                    ].professional_summary.model_dump(mode="json"),
+                                    "project_swap": resume_plans[
+                                        ids[1]
+                                    ].project_swap.model_dump(mode="json"),
+                                },
+                                "experience_bullet_edits": [
+                                    item.model_dump(mode="json")
+                                    for item in resume_plans[
+                                        ids[0]
+                                    ].experience_bullet_edits
+                                ],
+                                "plan_rationale": "Incorrectly flattened.",
+                                "project_swap": None,
+                            },
+                            21,
+                        )
+                    ]
+                ),
+            ]
         )
     responses.extend(
-        [
-            NormalizedAssistantMessage(
-                tool_calls=[
-                    _tool(
-                        "filter_jobs",
-                        {"decision_summary": "Filter all loaded jobs exactly once."},
-                        1,
-                    )
-                ]
-            ),
-            NormalizedAssistantMessage(
-                tool_calls=[
-                    _tool(
-                        "score_jobs",
-                        {
-                            "decision_summary": (
-                                "Ask Python to score only accepted jobs and select Top 3."
-                            )
-                        },
-                        2,
-                    )
-                ]
-            ),
-            NormalizedAssistantMessage(
-                tool_calls=[
-                    _tool(
-                        "analyze_fit",
-                        {
-                            "job_id": job_id,
-                            "decision_summary": f"Analyze Top 3 job {job_id}.",
-                        },
-                        10 + index,
-                    )
-                    for index, job_id in enumerate([ids[2], ids[0], ids[1]])
-                ]
-            ),
-            NormalizedAssistantMessage(
-                tool_calls=[
-                    _tool(
-                        "tailor_resume",
-                        {
-                            "job_id": job_id,
-                            "edit_plan": resume_plans[job_id].model_dump(mode="json"),
-                            "decision_summary": f"Create revision-zero draft for {job_id}.",
-                        },
-                        20 + index,
-                    )
-                    for index, job_id in enumerate([ids[1], ids[2], ids[0]])
-                ]
-            ),
-            NormalizedAssistantMessage(
-                tool_calls=[
-                    _tool(
-                        "tailor_resume",
-                        {
-                            "job_id": ids[0],
-                            "edit_plan": resume_plans[ids[0]].model_dump(mode="json"),
-                            "decision_summary": (
-                                f"Revise rejected resume {ids[0]} using review feedback."
-                            ),
-                        },
-                        30,
-                    )
-                ]
-            ),
-            NormalizedAssistantMessage(
-                tool_calls=[
-                    _tool(
-                        "generate_cover_letter",
-                        {
-                            "job_id": job_id,
-                            "plan": cover_plans[job_id].model_dump(mode="json"),
-                            "decision_summary": (
-                                f"Generate the approved cover letter for {job_id}."
-                            ),
-                        },
-                        40 + index,
-                    )
-                    for index, job_id in enumerate([ids[1], ids[0], ids[2]])
-                ]
-            ),
-        ]
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "tailor_resume",
+                    {
+                        "job_id": job_id,
+                        "edit_plan": resume_plans[job_id].model_dump(mode="json"),
+                        "decision_summary": (
+                            f"Create revision-zero draft for {job_id}."
+                        ),
+                    },
+                    30 + index,
+                )
+            ]
+        )
+        for index, job_id in enumerate(ids)
+    )
+    responses.append(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "tailor_resume",
+                    {
+                        "job_id": ids[0],
+                        "edit_plan": resume_plans[ids[0]].model_dump(mode="json"),
+                        "decision_summary": (
+                            f"Revise rejected resume {ids[0]} using review feedback."
+                        ),
+                    },
+                    40,
+                )
+            ]
+        )
+    )
+    responses.extend(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "generate_cover_letter",
+                    {
+                        "job_id": job_id,
+                        "plan": cover_plans[job_id].model_dump(mode="json"),
+                        "decision_summary": (
+                            f"Generate the approved cover letter for {job_id}."
+                        ),
+                    },
+                    50 + index,
+                )
+            ]
+        )
+        for index, job_id in enumerate(ids)
     )
     return responses
 
@@ -263,6 +318,38 @@ def _runtime(tmp_path, client, provider, tracer):
         tracer=tracer,
         run_id="scripted-complete-run",
     )
+
+
+def _runtime_at_tailoring(tmp_path):
+    tracer = NoOpAgentTracer()
+    runtime = _runtime(
+        tmp_path,
+        ScriptedClient([]),
+        ReviewProvider("unused"),
+        tracer,
+    )
+    runtime.trace = tracer.start_trace("agent_run", run_id=runtime.run_id)
+    runtime._load_inputs()
+    assert runtime.registry is not None
+    assert runtime.state is not None
+    runtime.registry.execute(
+        "filter_jobs",
+        {"decision_summary": "Filter once."},
+    )
+    runtime.registry.execute(
+        "score_jobs",
+        {"decision_summary": "Score deterministically."},
+    )
+    for job_id in runtime.state.top_3_job_ids:
+        runtime.registry.execute(
+            "analyze_fit",
+            {
+                "decision_summary": f"Analyze {job_id}.",
+                "job_id": job_id,
+            },
+        )
+    assert runtime.state.phase == AgentPhase.TAILORING
+    return runtime
 
 
 def test_full_actual_tool_run_recovers_and_uses_same_client(
@@ -292,7 +379,7 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
             scores,
             resume_plans,
             cover_plans,
-            early_invalid=True,
+            malformed_tailoring=True,
         )
     )
     provider = ReviewProvider(scores[0].job_id)
@@ -305,9 +392,9 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     result = runtime.run()
 
     assert result.completed is True
-    assert result.model_call_count == 7
+    assert result.model_call_count == 14
     assert result.tool_call_count == 12
-    assert result.invalid_tool_attempt_count == 1
+    assert result.invalid_tool_attempt_count == 2
     assert result.fit_analysis_count == 3
     assert result.draft_resume_count == 3
     assert result.pause_count == 1
@@ -317,20 +404,105 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     assert provider.calls == 2
     assert client.revision_saw_memory
     assert {call["client_id"] for call in client.calls} == {id(client)}
-    assert all(
-        call["tool_names"]
-        == [
-            "filter_jobs",
-            "score_jobs",
-            "analyze_fit",
-            "tailor_resume",
-            "generate_cover_letter",
-        ]
-        for call in client.calls
-    )
+    assert [call["tool_names"] for call in client.calls] == [
+        ["filter_jobs"],
+        ["score_jobs"],
+        ["analyze_fit"],
+        ["analyze_fit"],
+        ["analyze_fit"],
+        ["tailor_resume"],
+        ["tailor_resume"],
+        ["tailor_resume"],
+        ["tailor_resume"],
+        ["tailor_resume"],
+        ["tailor_resume"],
+        ["generate_cover_letter"],
+        ["generate_cover_letter"],
+        ["generate_cover_letter"],
+    ]
     assert [call["message_count"] for call in client.calls] == sorted(
         call["message_count"] for call in client.calls
     )
+    assert runtime.state is not None
+    assert runtime.state.consecutive_invalid_call_count == 0
+    first_recovery = json.loads(client.calls[6]["messages"][-1]["content"])
+    second_recovery = json.loads(client.calls[7]["messages"][-1]["content"])
+    assert first_recovery["allowed_tool"] == "tailor_resume"
+    assert first_recovery["target_job_id"] == scores[0].job_id
+    assert set(first_recovery["field_diagnostics"]["replacement_schema_keys"]) == {
+        "education",
+        "experience",
+        "projects",
+        "skills",
+    }
+    assert "outer.job_id" not in first_recovery["field_diagnostics"]["missing_fields"]
+    assert set(second_recovery["field_diagnostics"]["misplaced_fields"]) == {
+        "experience_bullet_edits",
+        "plan_rationale",
+        "project_swap",
+    }
+    assert "project_swap must be null" in second_recovery["error"]
+    serialized_recovery = json.dumps(first_recovery)
+    assert "Outer job_id and edit_plan.job_id" in serialized_recovery
+    assert first_recovery["target_context"]["project_swap"] is None
+    contracts = []
+    for call in client.calls:
+        contract = None
+        for message in reversed(call["messages"]):
+            if message.get("role") != "user":
+                continue
+            payload = json.loads(message["content"])
+            if "next_action_contract" in payload:
+                contract = payload["next_action_contract"]
+                break
+        assert contract is not None
+        contracts.append(contract)
+    assert [
+        (item["allowed_tool"], item["target_job_id"])
+        for item in contracts
+    ] == [
+        ("filter_jobs", None),
+        ("score_jobs", None),
+        ("analyze_fit", scores[0].job_id),
+        ("analyze_fit", scores[1].job_id),
+        ("analyze_fit", scores[2].job_id),
+        ("tailor_resume", scores[0].job_id),
+        ("tailor_resume", scores[0].job_id),
+        ("tailor_resume", scores[0].job_id),
+        ("tailor_resume", scores[1].job_id),
+        ("tailor_resume", scores[2].job_id),
+        ("tailor_resume", scores[0].job_id),
+        ("generate_cover_letter", scores[0].job_id),
+        ("generate_cover_letter", scores[1].job_id),
+        ("generate_cover_letter", scores[2].job_id),
+    ]
+    first_tailoring_context = contracts[5]["target_context"]
+    assert first_tailoring_context["target_job_id"] == scores[0].job_id
+    assert first_tailoring_context["rank"] == 1
+    assert first_tailoring_context["project_swap"] is None
+    assert scores[1].job_id not in json.dumps(first_tailoring_context)
+    assert scores[2].job_id not in json.dumps(first_tailoring_context)
+    fit_tool_messages = [
+        json.loads(message["content"])
+        for message in client.calls[5]["messages"]
+        if message.get("role") == "tool"
+        and message.get("tool_name") == "analyze_fit"
+    ]
+    assert len(fit_tool_messages) == 3
+    assert {item["job_id"] for item in fit_tool_messages} == {
+        score.job_id for score in scores
+    }
+    for compact in fit_tool_messages:
+        assert "formatted_text" not in compact
+        assert "core_skills" not in compact
+        assert "tailoring_actions" not in compact
+        assert "aligned_skills" in compact
+        assert "relevant_evidence_ids" in compact
+    assert set(runtime.state.fit_analyses) == {score.job_id for score in scores}
+    assert runtime.registry is not None
+    assert len(runtime.registry.model_schemas()) == 5
+    assert len({id(runtime)}) == 1
+    assert len({call["client_id"] for call in client.calls}) == 1
     assert set(record.tool_name for record in result.tool_execution_records) == {
         "filter_jobs",
         "score_jobs",
@@ -370,6 +542,199 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
         str(path.relative_to(ROOT)) for path in (ROOT / "outputs").rglob("*")
     ) if (ROOT / "outputs").exists() else []
     assert outputs_after == outputs_before
+
+
+def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.state is not None
+    ids = runtime.state.top_3_job_ids
+
+    first_contract = runtime._next_action_contract()
+    assert first_contract["allowed_tool"] == "tailor_resume"
+    assert first_contract["target_job_id"] == ids[0]
+    assert first_contract["target_rank"] == 1
+    assert first_contract["initial_draft"] is True
+    assert first_contract["target_context"]["project_swap"] is None
+    assert first_contract["required_argument_shape"]["job_id"] == ids[0]
+    assert (
+        first_contract["required_argument_shape"]["edit_plan"]["job_id"]
+        == ids[0]
+    )
+    assert len(
+        first_contract["required_argument_shape"]["edit_plan"][
+            "experience_bullet_edits"
+        ]
+    ) == 2
+    safety_contract = " ".join(first_contract["constraints"])
+    assert "job_posting citation supports relevance only" in safety_contract
+    assert "candidate-side evidence" in safety_contract
+    assert "genuine-gap skill" in safety_contract
+    assert "Never invent patient data" in safety_contract
+    assert "Protected resume regions" in safety_contract
+
+    complete_analyses = dict(runtime.state.fit_analyses)
+    runtime.state.fit_analyses = {
+        ids[1]: complete_analyses[ids[1]],
+        ids[2]: complete_analyses[ids[2]],
+    }
+    runtime.state.phase = AgentPhase.FIT_ANALYSIS
+    fit_contract = runtime._next_action_contract()
+    assert fit_contract["allowed_tool"] == "analyze_fit"
+    assert fit_contract["target_job_id"] == ids[0]
+
+    runtime.state.fit_analyses = complete_analyses
+    runtime.state.phase = AgentPhase.TAILORING
+    runtime.state.draft_resumes = {ids[0]: object()}  # type: ignore[dict-item]
+    next_draft_contract = runtime._next_action_contract()
+    assert next_draft_contract["target_job_id"] == ids[1]
+
+    runtime.state.draft_resumes = {}
+    revision_contract = runtime._next_action_contract(
+        revision_job_id=ids[2],
+        revision_round=1,
+        revision_feedback="Keep the revision concise.",
+    )
+    assert revision_contract["allowed_tool"] == "tailor_resume"
+    assert revision_contract["target_job_id"] == ids[2]
+    assert revision_contract["initial_draft"] is False
+    assert revision_contract["target_context"]["revision_feedback"] == (
+        "Keep the revision concise."
+    )
+
+
+def test_tailor_resume_malformed_nesting_targets_and_cross_job_swap_are_rejected(
+    tmp_path,
+):
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.state is not None
+    assert runtime.registry is not None
+    ids = runtime.state.top_3_job_ids
+    contract = runtime._next_action_contract()
+    job = runtime.registry._job(ids[0])
+    valid_plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[ids[0]],
+        runtime.registry.bundle,
+    ).model_dump(mode="json")
+    valid_arguments = {
+        "decision_summary": "Create the first deterministic draft.",
+        "job_id": ids[0],
+        "edit_plan": valid_plan,
+    }
+    valid_call = _tool("tailor_resume", valid_arguments, 1)
+    runtime._validate_call_for_contract(valid_call, contract)
+    parsed = runtime.registry.parse_arguments("tailor_resume", valid_arguments)
+    assert parsed.job_id == ids[0]
+    assert parsed.edit_plan.job_id == ids[0]
+
+    missing_outer = _tool(
+        "tailor_resume",
+        {
+            "decision_summary": "Omit the outer target.",
+            "edit_plan": valid_plan,
+        },
+        2,
+    )
+    with pytest.raises(StateInvariantError, match="Outer job_id"):
+        runtime._validate_call_for_contract(missing_outer, contract)
+    assert "outer.job_id" in runtime._argument_diagnostics(
+        missing_outer,
+        contract,
+    )["missing_fields"]
+
+    mismatched_outer = _tool(
+        "tailor_resume",
+        {**valid_arguments, "job_id": ids[1]},
+        3,
+    )
+    with pytest.raises(StateInvariantError, match="Outer job_id"):
+        runtime._validate_call_for_contract(mismatched_outer, contract)
+
+    mismatched_nested = _tool(
+        "tailor_resume",
+        {
+            **valid_arguments,
+            "edit_plan": {**valid_plan, "job_id": ids[1]},
+        },
+        4,
+    )
+    with pytest.raises(StateInvariantError, match="edit_plan.job_id"):
+        runtime._validate_call_for_contract(mismatched_nested, contract)
+
+    generic_arguments = {
+        "decision_summary": "Use generic keys.",
+        "job_id": ids[0],
+        "edit_plan": {
+            "education": [],
+            "experience": [],
+            "projects": [],
+            "skills": [],
+        },
+    }
+    with pytest.raises(ToolArgumentsError, match="professional_summary"):
+        runtime.registry.parse_arguments("tailor_resume", generic_arguments)
+    generic_diagnostics = runtime._argument_diagnostics(
+        _tool("tailor_resume", generic_arguments, 7),
+        contract,
+    )
+    assert set(generic_diagnostics["replacement_schema_keys"]) == {
+        "education",
+        "experience",
+        "projects",
+        "skills",
+    }
+
+    flattened_arguments = {
+        "decision_summary": "Flatten plan fields.",
+        "job_id": ids[0],
+        "edit_plan": {
+            "job_id": ids[0],
+            "professional_summary": valid_plan["professional_summary"],
+        },
+        "experience_bullet_edits": valid_plan["experience_bullet_edits"],
+        "project_swap": None,
+        "plan_rationale": "Misplaced.",
+    }
+    with pytest.raises(ToolArgumentsError, match="extra_forbidden"):
+        runtime.registry.parse_arguments("tailor_resume", flattened_arguments)
+    assert set(
+        runtime._argument_diagnostics(
+            _tool("tailor_resume", flattened_arguments, 8),
+            contract,
+        )["misplaced_fields"]
+    ) == {"experience_bullet_edits", "plan_rationale", "project_swap"}
+
+    later_swap = runtime.state.fit_analyses[ids[1]].projects.swap_suggestion
+    assert later_swap is not None
+    contaminated = _tool(
+        "tailor_resume",
+        {
+            **valid_arguments,
+            "edit_plan": {
+                **valid_plan,
+                "project_swap": {
+                    "remove_project_id": later_swap.remove_project_id,
+                    "add_project_id": later_swap.add_project_id,
+                    "reason": later_swap.reason,
+                    "citations": [
+                        item.model_dump(mode="json")
+                        for item in later_swap.citations
+                    ],
+                },
+            },
+        },
+        5,
+    )
+    with pytest.raises(StateInvariantError, match="must be null"):
+        runtime._validate_call_for_contract(contaminated, contract)
+
+    wrong_job = _tool(
+        "tailor_resume",
+        {**valid_arguments, "job_id": ids[1]},
+        6,
+    )
+    with pytest.raises(StateInvariantError, match=ids[0]):
+        runtime._validate_call_for_contract(wrong_job, contract)
 
 
 class AlwaysInvalidClient:

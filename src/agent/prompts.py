@@ -3,6 +3,11 @@
 SYSTEM_PROMPT = """You are the one Job Search Agent operating in one continuous
 reasoning and tool-calling conversation. Use only the five supplied tools:
 filter_jobs, score_jobs, analyze_fit, tailor_resume, and generate_cover_letter.
+On each turn, the runtime exposes exactly one currently valid tool and supplies
+a next_action_contract. Return exactly one call to that tool, use its exact
+target_job_id when present, and follow the required argument nesting literally.
+Do not choose a later job, reuse another job's Fit Analysis, or move nested
+fields to the outer tool arguments.
 
 Follow this workflow:
 1. Filter once, then ask Python to score only the accepted jobs. Never provide,
@@ -30,4 +35,83 @@ provide hidden chain-of-thought, private reasoning, an internal monologue, or
 step-by-step thought. Return tool calls until the workflow is complete.
 """
 
-__all__ = ["SYSTEM_PROMPT"]
+TAILOR_RESUME_ARGUMENT_TEMPLATE = {
+    "decision_summary": "<concise explanation>",
+    "job_id": "<TARGET_JOB_ID>",
+    "edit_plan": {
+        "job_id": "<TARGET_JOB_ID>",
+        "professional_summary": {
+            "new_text": "<evidence-grounded text>",
+            "reason": "<reason>",
+            "citations": [
+                {
+                    "source_type": "<allowed source type>",
+                    "source_id": "<real source id>",
+                    "source_field": "<real field>",
+                    "evidence_id": "<real evidence id or null>",
+                    "supported_claim": "<supported claim>",
+                }
+            ],
+        },
+        "experience_bullet_edits": [
+            {
+                "bullet_id": "<existing editable bullet id>",
+                "new_text": "<evidence-grounded replacement>",
+                "reason": "<reason>",
+                "citations": [],
+            },
+            {
+                "bullet_id": "<different existing editable bullet id>",
+                "new_text": "<evidence-grounded replacement>",
+                "reason": "<reason>",
+                "citations": [],
+            },
+        ],
+        "skill_section_edits": [],
+        "project_swap": None,
+        "plan_rationale": "<concise rationale>",
+    },
+}
+
+TAILOR_RESUME_CONSTRAINTS = [
+    "job_id is required twice.",
+    "Outer job_id and edit_plan.job_id must both equal TARGET_JOB_ID.",
+    "Exactly two experience_bullet_edits with different editable bullet IDs are required.",
+    "All plan fields must remain inside edit_plan.",
+    "Do not use education, experience, projects, or skills as replacement schema keys.",
+    (
+        "Do not put experience_bullet_edits, skill_section_edits, project_swap, "
+        "or plan_rationale at the outer level."
+    ),
+    "skill_section_edits must be an empty array when no valid edit is needed.",
+    "project_swap must be null when the target Fit Analysis has no swap.",
+    "When a swap exists, it must exactly match the target job's Fit Analysis.",
+    "Never copy a project swap from another job.",
+    (
+        "A job_posting citation supports relevance only; every candidate claim "
+        "requires candidate-side evidence."
+    ),
+    (
+        "The professional summary must include at least one job_posting citation "
+        "and at least one candidate-side citation."
+    ),
+    (
+        "Candidate-side sources are experience, experience_bullet, "
+        "portfolio_project, master_skill, evidence_registry, memory_fact, "
+        "candidate_profile, or resume_tex."
+    ),
+    "Do not leave citations empty in the actual submitted summary or bullet edits.",
+    "Never present a genuine-gap skill as a candidate qualification.",
+    (
+        "Never invent patient data, interfaces, production deployment, metrics, "
+        "responsibilities, or accuracy improvements."
+    ),
+    "Use only the target job's Fit Analysis.",
+    "Protected resume regions must remain unchanged.",
+]
+
+__all__ = [
+    "SYSTEM_PROMPT",
+    "TAILOR_RESUME_ARGUMENT_TEMPLATE",
+    "TAILOR_RESUME_CONSTRAINTS",
+]

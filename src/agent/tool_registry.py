@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -158,18 +159,25 @@ class AssignmentToolRegistry:
         return tuple(self.TOOL_MODELS)
 
     @classmethod
-    def model_schemas(cls) -> list[dict[str, Any]]:
-        """Build Ollama function schemas directly from typed Pydantic models."""
+    def model_schemas(
+        cls,
+        tool_names: Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build schemas for all five tools or a deterministic allowed subset."""
+        names = tuple(cls.TOOL_MODELS) if tool_names is None else tuple(tool_names)
+        unknown = [name for name in names if name not in cls.TOOL_MODELS]
+        if unknown:
+            raise ToolRegistryError(f"Unknown schema tool names: {unknown}")
         return [
             {
                 "type": "function",
                 "function": {
                     "name": name,
                     "description": cls._DESCRIPTIONS[name],
-                    "parameters": model.model_json_schema(),
+                    "parameters": cls.TOOL_MODELS[name].model_json_schema(),
                 },
             }
-            for name, model in cls.TOOL_MODELS.items()
+            for name in names
         ]
 
     def parse_arguments(
@@ -262,7 +270,7 @@ class AssignmentToolRegistry:
                     revision_round=revision_round,
                     review_feedback=review_feedback,
                 )
-                span.set_output(payload)
+                span.set_output(result)
         except (StateInvariantError, ToolRegistryError):
             raise
         except Exception as exc:

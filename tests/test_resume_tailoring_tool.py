@@ -424,6 +424,23 @@ def test_genuine_gap_and_target_company_claims_are_rejected(
         _call(workflow, tmp_path, company_plan)
 
 
+def test_job_posting_only_citation_cannot_support_candidate_summary_claim(
+    workflow,
+    tmp_path: Path,
+) -> None:
+    bundle, _, job, _, analysis = _camden(workflow)
+    plan = _valid_plan(job, analysis, bundle)
+    posting_only = plan.model_copy(
+        update={
+            "professional_summary": plan.professional_summary.model_copy(
+                update={"citations": [_job_citation(job)]}
+            )
+        }
+    )
+    with pytest.raises(ResumeEvidenceError, match="candidate-evidence"):
+        _call(workflow, tmp_path, posting_only)
+
+
 def test_surface_alignment_accepted_and_non_equivalent_rejected(
     workflow,
     tmp_path: Path,
