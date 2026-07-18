@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 import uuid
@@ -312,12 +313,13 @@ _COVER_PREFERRED_SKILLS: dict[str, list[str]] = {
 
 
 class _CoverLetterBodyParagraph(BaseModel):
-    """Model-authored cover letter paragraph text."""
+    """Assembled cover letter paragraph after deterministic claim insertion."""
 
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=1)
     reason: str = Field(min_length=1)
+    selected_candidate_claim: str | None = None
 
     @field_validator("text", "reason")
     @classmethod
@@ -328,8 +330,27 @@ class _CoverLetterBodyParagraph(BaseModel):
         return value
 
 
+class _CoverLetterBodyParagraphWrapper(BaseModel):
+    """Model-authored paragraph wrapper before deterministic assembly."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lead_in: str = Field(min_length=1)
+    selected_candidate_claim: str = Field(min_length=1)
+    follow_up: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+    @field_validator("lead_in", "follow_up", "reason", "selected_candidate_claim")
+    @classmethod
+    def strip_wrapper_fields(cls, value: str) -> str:
+        value = " ".join(str(value).split())
+        if not value:
+            raise ValueError("wrapper fields must be nonempty")
+        return value
+
+
 class _CoverLetterTransportDraft(BaseModel):
-    """Compact transport layer for model-facing cover letter drafts."""
+    """Compact transport layer for assembled cover letter drafts."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -435,7 +456,12 @@ class _AllowedCandidateClaim(BaseModel):
     numeric_tokens: list[str] = Field(default_factory=list)
 
 
-_COVER_MAX_ALLOWED_CLAIMS = 6
+_COVER_MAX_ALLOWED_CLAIMS = 5
+_COVER_LEAD_IN_MIN_WORDS = 3
+_COVER_LEAD_IN_MAX_WORDS = 30
+_COVER_FOLLOW_UP_MIN_WORDS = 5
+_COVER_FOLLOW_UP_MAX_WORDS = 45
+_COVER_WRAPPER_BULLET_MARKERS = ("•", "·", "- ", "* ", "1.", "2.")
 _COVER_CITATION_SOURCE_ORDER = {
     "job_posting": 0,
     "experience": 1,
@@ -535,6 +561,10 @@ class AgentLoopLimitError(AgentRuntimeError):
     """Raised when model/tool safety limits are reached."""
 
 
+class DuplicateInvalidOutputError(AgentRuntimeError):
+    """Raised when identical invalid model output repeats without safe recovery."""
+
+
 class AgentModelResponseError(AgentRuntimeError):
     """Raised when the model cannot provide a usable workflow action."""
 
@@ -605,6 +635,8 @@ class JobSearchAgentRuntime:
         self._cover_letter_schema_model_cache: dict[tuple[Any, ...], type[BaseModel]] = (
             {}
         )
+        self._cover_letter_last_invalid_fingerprint: str | None = None
+        self._cover_letter_invalid_repeat_count = 0
         self._cover_letter_date = cover_letter_date or date.today()
 
     @staticmethod
@@ -625,6 +657,7 @@ class JobSearchAgentRuntime:
                 "cover_patch_fields",
                 "cover_recovery_mode",
                 "allowed_company_hooks",
+                "allowed_candidate_claims",
                 "cover_letter_hook_extraction_fallback_used",
                 "reconciliation_metadata",
             }
@@ -1868,6 +1901,8 @@ class JobSearchAgentRuntime:
         job_id: str,
         paragraph_text: str,
         skill_items: list[dict[str, Any]],
+        *,
+        selected_claim: str | None = None,
     ) -> list[dict[str, Any]]:
         assert self.registry is not None
         job = self.registry._job(job_id)
@@ -1879,8 +1914,14 @@ class JobSearchAgentRuntime:
                 "evidence_id": None,
             }
         ]
-        for entry in self._detect_allowed_claims_in_text(paragraph_text, job_id):
-            citations.extend(copy.deepcopy(entry.citations))
+        if selected_claim:
+            for entry in self._build_allowed_candidate_claims(job_id):
+                if entry.claim_text == selected_claim:
+                    citations.extend(copy.deepcopy(entry.citations))
+                    break
+        else:
+            for entry in self._detect_allowed_claims_in_text(paragraph_text, job_id):
+                citations.extend(copy.deepcopy(entry.citations))
         for fact in self.registry.memory.facts:
             if self._paragraph_uses_memory_fact(paragraph_text, fact):
                 citations.append(self._memory_fact_citation(fact, paragraph_text))
@@ -2309,16 +2350,78 @@ class JobSearchAgentRuntime:
             hook_property["enum"] = list(allowed_hooks)
         return schema
 
+    @staticmethod
+    def _apply_cover_claim_enum_to_schema(
+        schema: dict[str, Any],
+        allowed_claims: list[str],
+    ) -> dict[str, Any]:
+        if not allowed_claims:
+            return schema
+        for prop in ("body_paragraph_1", "body_paragraph_2"):
+            paragraph = schema.get("properties", {}).get(prop)
+            if isinstance(paragraph, dict):
+                claim_property = paragraph.get("properties", {}).get(
+                    "selected_candidate_claim"
+                )
+                if isinstance(claim_property, dict):
+                    claim_property["enum"] = list(allowed_claims)
+        wrapper_def = schema.get("$defs", {}).get("_CoverLetterParagraphWrapper")
+        if isinstance(wrapper_def, dict):
+            claim_property = wrapper_def.get("properties", {}).get(
+                "selected_candidate_claim"
+            )
+            if isinstance(claim_property, dict):
+                claim_property["enum"] = list(allowed_claims)
+        return schema
+
+    def _cover_letter_paragraph_wrapper_model(
+        self,
+        allowed_claims: tuple[str, ...],
+    ) -> type[BaseModel]:
+        cache_key = ("paragraph_wrapper", allowed_claims)
+        cached = self._cover_letter_schema_model_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        claim_field = (
+            str,
+            Field(
+                min_length=1,
+                json_schema_extra=(
+                    {"enum": list(allowed_claims)} if allowed_claims else {}
+                ),
+            ),
+        )
+        model = create_model(
+            "_CoverLetterParagraphWrapper",
+            __config__=ConfigDict(extra="forbid"),
+            lead_in=(str, Field(min_length=1)),
+            selected_candidate_claim=claim_field,
+            follow_up=(str, Field(min_length=1)),
+            reason=(str, Field(min_length=1, max_length=200)),
+        )
+        self._cover_letter_schema_model_cache[cache_key] = model
+        return model
+
+    def _allowed_claims_for_contract(self, contract: dict[str, Any]) -> list[str]:
+        allowed = list(contract.get("allowed_candidate_claims") or [])
+        target_job_id = contract.get("target_job_id")
+        if not allowed and target_job_id:
+            allowed = self._allowed_candidate_claim_texts(target_job_id)
+        return allowed
+
     def _cover_letter_schema_model_for_contract(
         self,
         contract: dict[str, Any],
     ) -> type[BaseModel]:
         allowed_hooks = tuple(contract.get("allowed_company_hooks") or ())
         patch_fields = tuple(contract.get("cover_patch_fields") or ())
-        cache_key = (allowed_hooks, patch_fields)
+        allowed_claims = tuple(self._allowed_claims_for_contract(contract))
+        cache_key = (allowed_hooks, patch_fields, allowed_claims)
         cached = self._cover_letter_schema_model_cache.get(cache_key)
         if cached is not None:
             return cached
+
+        wrapper_model = self._cover_letter_paragraph_wrapper_model(allowed_claims)
 
         if patch_fields:
             field_defs: dict[str, Any] = {"job_id": (str, Field(min_length=1))}
@@ -2331,9 +2434,9 @@ class JobSearchAgentRuntime:
                     ),
                 )
             if "body_paragraph_1" in patch_fields:
-                field_defs["body_paragraph_1"] = (_CoverLetterBodyParagraph, ...)
+                field_defs["body_paragraph_1"] = (wrapper_model, ...)
             if "body_paragraph_2" in patch_fields:
-                field_defs["body_paragraph_2"] = (_CoverLetterBodyParagraph | None, ...)
+                field_defs["body_paragraph_2"] = (wrapper_model | None, ...)
             if "skills" in patch_fields:
                 field_defs["skills"] = (list[str], Field(min_length=3, max_length=8))
             if "closing_sentence" in patch_fields:
@@ -2361,8 +2464,8 @@ class JobSearchAgentRuntime:
                     json_schema_extra={"enum": list(allowed_hooks)},
                 ),
             ),
-            body_paragraph_1=(_CoverLetterBodyParagraph, ...),
-            body_paragraph_2=(_CoverLetterBodyParagraph | None, None),
+            body_paragraph_1=(wrapper_model, ...),
+            body_paragraph_2=(wrapper_model | None, None),
             skills=(list[str], Field(min_length=1)),
             closing_sentence=(str, Field(min_length=1)),
             plan_rationale=(str, Field(min_length=1)),
@@ -2482,7 +2585,7 @@ class JobSearchAgentRuntime:
             "title": job.title,
             "company": job.company,
             "allowed_company_hooks": allowed_hooks,
-            "allowed_candidate_claims": allowed_claims,
+            "allowed_candidate_claim_count": len(allowed_claims),
             "approved_resume_revision": finalized.approved_revision_round,
             "finalized_resume_summary": (
                 f"Approved revision {finalized.approved_revision_round} resume "
@@ -2509,7 +2612,12 @@ class JobSearchAgentRuntime:
             "decision_summary": "<concise explanation>",
             "job_id": target_job_id,
             "company_hook_phrase": hook_shape,
-            "body_paragraph_1": {"text": "<paragraph 1>", "reason": "<reason>"},
+            "body_paragraph_1": {
+                "lead_in": "<bounded introduction>",
+                "selected_candidate_claim": "<exact enum value>",
+                "follow_up": "<bounded conclusion>",
+                "reason": "<reason>",
+            },
             "body_paragraph_2": None,
             "skills": ["<3 to 8 allowed skills>"],
             "closing_sentence": "<concise closing>",
@@ -2538,11 +2646,190 @@ class JobSearchAgentRuntime:
                 f"Cover letter transport rejection: {exc}"
             ) from exc
 
-    def _parse_cover_letter_transport(
+    @staticmethod
+    def _assemble_paragraph_text(lead_in: str, claim: str, follow_up: str) -> str:
+        lead = lead_in.strip()
+        follow = follow_up.strip()
+        if lead.endswith((".", "!", "?", ",", ";", ":")):
+            separator_before_claim = " "
+        else:
+            separator_before_claim = " "
+        if follow and claim.endswith((".", "!", "?", ",", ";", ":")):
+            separator_before_follow = " "
+        else:
+            separator_before_follow = " "
+        return f"{lead}{separator_before_claim}{claim}{separator_before_follow}{follow}".strip()
+
+    @staticmethod
+    def _segment_restates_allowed_claim(segment: str, claim: str) -> bool:
+        if claim in segment:
+            return True
+        claim_words = claim.casefold().split()
+        segment_norm = segment.casefold()
+        for window in range(min(6, len(claim_words)), len(claim_words) + 1):
+            for index in range(len(claim_words) - window + 1):
+                phrase = " ".join(claim_words[index : index + window])
+                if len(phrase) >= 24 and phrase in segment_norm:
+                    return True
+        return False
+
+    def _audit_paragraph_wrapper_segments(
+        self,
+        paragraph: dict[str, Any],
+        field: str,
+        job_id: str,
+        allowed_claims: list[str],
+    ) -> list[_CoverLetterAuditIssue]:
+        issues: list[_CoverLetterAuditIssue] = []
+        lead_in = str(paragraph.get("lead_in", ""))
+        follow_up = str(paragraph.get("follow_up", ""))
+        reason = str(paragraph.get("reason", ""))
+        selected = str(paragraph.get("selected_candidate_claim", ""))
+
+        for segment_name, segment in (("lead_in", lead_in), ("follow_up", follow_up)):
+            words = _word_count(segment)
+            min_words, max_words = (
+                (_COVER_LEAD_IN_MIN_WORDS, _COVER_LEAD_IN_MAX_WORDS)
+                if segment_name == "lead_in"
+                else (_COVER_FOLLOW_UP_MIN_WORDS, _COVER_FOLLOW_UP_MAX_WORDS)
+            )
+            if not min_words <= words <= max_words:
+                issues.append(
+                    _CoverLetterAuditIssue(
+                        field=field,
+                        category="semantic_text",
+                        message=(
+                            f"{field}.{segment_name} must contain {min_words} to "
+                            f"{max_words} words; found {words}"
+                        ),
+                    )
+                )
+            if re.search(r"\d", segment):
+                issues.append(
+                    _CoverLetterAuditIssue(
+                        field=field,
+                        category="semantic_text",
+                        message=f"{field}.{segment_name} must not contain digits",
+                    )
+                )
+            if "%" in segment:
+                issues.append(
+                    _CoverLetterAuditIssue(
+                        field=field,
+                        category="semantic_text",
+                        message=f"{field}.{segment_name} must not contain percent signs",
+                    )
+                )
+            for marker in _COVER_WRAPPER_BULLET_MARKERS:
+                if segment.lstrip().startswith(marker.strip()):
+                    issues.append(
+                        _CoverLetterAuditIssue(
+                            field=field,
+                            category="semantic_text",
+                            message=(
+                                f"{field}.{segment_name} must not contain bullet "
+                                "markers or headings"
+                            ),
+                        )
+                    )
+            for claim in allowed_claims:
+                if claim and self._segment_restates_allowed_claim(segment, claim):
+                    issues.append(
+                        _CoverLetterAuditIssue(
+                            field=field,
+                            category="semantic_text",
+                            message=(
+                                f"{field}.{segment_name} must not repeat or restate "
+                                "an allowed candidate claim"
+                            ),
+                        )
+                    )
+                    break
+            for claim in allowed_claims:
+                for number in _COVER_NUMBER_PATTERN.findall(claim):
+                    if number in segment:
+                        issues.append(
+                            _CoverLetterAuditIssue(
+                                field=field,
+                                category="semantic_text",
+                                message=(
+                                    f"{field}.{segment_name} must not restate "
+                                    "candidate metrics"
+                                ),
+                            )
+                        )
+
+        if _word_count(reason) > 18:
+            issues.append(
+                _CoverLetterAuditIssue(
+                    field=field,
+                    category="semantic_text",
+                    message=f"{field} reason must be at most 18 words",
+                )
+            )
+        if selected and selected not in set(allowed_claims):
+            issues.append(
+                _CoverLetterAuditIssue(
+                    field=field,
+                    category="draft_schema",
+                    message=(
+                        f"{field}.selected_candidate_claim must be one of the "
+                        "allowed claim enum values"
+                    ),
+                )
+            )
+        return issues
+
+    def _assemble_cover_letter_transport(
+        self,
+        wrapper_args: dict[str, Any],
+        contract: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = copy.deepcopy(wrapper_args)
+        target_job_id = contract.get("target_job_id")
+        if target_job_id is None:
+            raise StateInvariantError(
+                "Cover letter assembly rejection: missing deterministic target job"
+            )
+        allowed_claims = self._allowed_claims_for_contract(contract)
+        for field in ("body_paragraph_1", "body_paragraph_2"):
+            paragraph = result.get(field)
+            if not isinstance(paragraph, dict):
+                continue
+            if "text" in paragraph and "selected_candidate_claim" not in paragraph:
+                continue
+            wrapper_issues = self._audit_paragraph_wrapper_segments(
+                paragraph,
+                field,
+                target_job_id,
+                allowed_claims,
+            )
+            if wrapper_issues:
+                audit = _CoverLetterAuditResult(issues=wrapper_issues)
+                audit.raise_if_issues()
+            claim = str(paragraph["selected_candidate_claim"])
+            assembled_text = self._assemble_paragraph_text(
+                str(paragraph["lead_in"]),
+                claim,
+                str(paragraph["follow_up"]),
+            )
+            if claim not in assembled_text:
+                raise ToolArgumentsError(
+                    "Cover letter assembly rejection: selected claim is not an exact "
+                    "substring of the assembled paragraph"
+                )
+            result[field] = {
+                "text": assembled_text,
+                "reason": str(paragraph["reason"]),
+                "selected_candidate_claim": claim,
+            }
+        return result
+
+    def _parse_cover_letter_wrapper_draft(
         self,
         arguments: dict[str, Any],
         contract: dict[str, Any],
-    ) -> _CoverLetterTransportDraft:
+    ) -> dict[str, Any]:
         allowed_hooks = list(contract.get("allowed_company_hooks") or [])
         if not allowed_hooks:
             target_job_id = contract.get("target_job_id")
@@ -2553,17 +2840,22 @@ class JobSearchAgentRuntime:
                 str(arguments["company_hook_phrase"]),
                 allowed_hooks,
             )
-        full_contract = {**contract, "cover_patch_fields": []}
-        draft_model = self._cover_letter_schema_model_for_contract(full_contract)
+        draft_model = self._cover_letter_schema_model_for_contract(contract)
         try:
             validated = draft_model.model_validate(arguments)
         except ValidationError as exc:
             raise ToolArgumentsError(
                 f"Cover letter transport rejection: {exc}"
             ) from exc
-        return _CoverLetterTransportDraft.model_validate(
-            validated.model_dump(mode="json")
-        )
+        return validated.model_dump(mode="json")
+
+    def _parse_cover_letter_transport(
+        self,
+        arguments: dict[str, Any],
+        contract: dict[str, Any],
+    ) -> dict[str, Any]:
+        wrapper = self._parse_cover_letter_wrapper_draft(arguments, contract)
+        return self._assemble_cover_letter_transport(wrapper, contract)
 
     @staticmethod
     def _parse_cover_letter_draft(
@@ -2621,13 +2913,14 @@ class JobSearchAgentRuntime:
                 patch.model_dump(mode="json"),
                 patch_fields,
             )
-        transport = self._parse_cover_letter_transport(arguments, contract)
-        if transport.job_id != target_job_id:
+        full_contract = {**contract, "cover_patch_fields": []}
+        wrapper = self._parse_cover_letter_wrapper_draft(arguments, full_contract)
+        if wrapper.get("job_id") != target_job_id:
             raise StateInvariantError(
                 "Cover letter draft job_id mismatch: expected "
-                f"{target_job_id!r}; received {transport.job_id!r}"
+                f"{target_job_id!r}; received {wrapper.get('job_id')!r}"
             )
-        return transport.model_dump(mode="json")
+        return self._assemble_cover_letter_transport(wrapper, full_contract)
 
     def _semantic_cover_letter_draft(
         self,
@@ -2651,7 +2944,18 @@ class JobSearchAgentRuntime:
             "closing_sentence",
             "plan_rationale",
         }
-        return required.issubset(arguments)
+        if not required.issubset(arguments):
+            return False
+        paragraph = arguments.get("body_paragraph_1")
+        if not isinstance(paragraph, dict):
+            return False
+        wrapper_required = {
+            "lead_in",
+            "selected_candidate_claim",
+            "follow_up",
+            "reason",
+        }
+        return wrapper_required.issubset(paragraph)
 
     def _merge_cover_patch(
         self,
@@ -2661,7 +2965,15 @@ class JobSearchAgentRuntime:
     ) -> dict[str, Any]:
         merged = copy.deepcopy(base_draft)
         for field in patch_fields:
-            if field in patch:
+            if field not in patch:
+                continue
+            if field.startswith("body_paragraph") and isinstance(
+                merged.get(field), dict
+            ) and isinstance(patch[field], dict):
+                combined = copy.deepcopy(merged[field])
+                combined.update(copy.deepcopy(patch[field]))
+                merged[field] = combined
+            else:
                 merged[field] = copy.deepcopy(patch[field])
         return merged
 
@@ -2680,9 +2992,19 @@ class JobSearchAgentRuntime:
                 else "<exact allowed_company_hooks option>"
             )
         if "body_paragraph_1" in patch_fields:
-            shape["body_paragraph_1"] = {"text": "<paragraph 1>", "reason": "<reason>"}
+            shape["body_paragraph_1"] = {
+                "lead_in": "<bounded introduction>",
+                "selected_candidate_claim": "<exact enum value>",
+                "follow_up": "<bounded conclusion>",
+                "reason": "<reason>",
+            }
         if "body_paragraph_2" in patch_fields:
-            shape["body_paragraph_2"] = {"text": "<paragraph 2>", "reason": "<reason>"}
+            shape["body_paragraph_2"] = {
+                "lead_in": "<bounded introduction>",
+                "selected_candidate_claim": "<exact enum value>",
+                "follow_up": "<bounded conclusion>",
+                "reason": "<reason>",
+            }
         if "skills" in patch_fields:
             shape["skills"] = ["<3 to 8 allowed skills>"]
         if "closing_sentence" in patch_fields:
@@ -2706,6 +3028,10 @@ class JobSearchAgentRuntime:
         patch_fields = [
             field for field in patch_fields if field in _COVER_PATCHABLE_FIELDS
         ]
+        skills = raw_call.arguments.get("skills")
+        if isinstance(skills, list) and not 3 <= len(skills) <= 8:
+            patch_fields.append("skills")
+        patch_fields = sorted(set(patch_fields))
         if contract.get("cover_recovery_mode") == "patch" and self._cover_letter_patch_recovery:
             if error and (
                 "extra fields" in error.casefold()
@@ -2748,11 +3074,6 @@ class JobSearchAgentRuntime:
         if not self._is_complete_cover_draft(raw_call.arguments):
             self._cover_letter_patch_recovery = None
             return
-        try:
-            self._parse_cover_letter_transport_structure(raw_call.arguments)
-        except ToolArgumentsError:
-            self._cover_letter_patch_recovery = None
-            return
         if not patch_fields:
             self._cover_letter_patch_recovery = None
             return
@@ -2777,6 +3098,20 @@ class JobSearchAgentRuntime:
             "rejected_category": rejected_category,
         }
 
+    def _cover_letter_duplicate_wrapper_failure(
+        self,
+        contract: dict[str, Any],
+        audit: _CoverLetterAuditResult | None,
+    ) -> bool:
+        patch_fields = list(contract.get("cover_patch_fields") or [])
+        if not any(field.startswith("body_paragraph") for field in patch_fields):
+            return False
+        if not isinstance(audit, _CoverLetterAuditResult) or not audit.issues:
+            return False
+        return any(
+            issue.field.startswith("body_paragraph") for issue in audit.issues
+        )
+
     def _cover_patch_fields_from_error(
         self,
         error: str,
@@ -2798,6 +3133,8 @@ class JobSearchAgentRuntime:
                 "unsupported skill" in lowered
                 or "between 3 and 8" in lowered
                 or "duplicate skill" in lowered
+                or "at most 8" in lowered
+                or ("too many" in lowered and "skills" in lowered)
                 or (
                     "skills" in lowered
                     and "body" not in lowered
@@ -2823,6 +3160,9 @@ class JobSearchAgentRuntime:
             fields.append("closing_sentence")
         if "plan_rationale" in lowered:
             fields.append("plan_rationale")
+        for field in _COVER_PATCHABLE_FIELDS:
+            if f"{field}\n" in error or f'"{field}"' in error:
+                fields.append(field)
         if (
             "cover-letter skill" in lowered
             or "cannot present genuine-gap skill" in lowered
@@ -2869,6 +3209,130 @@ class JobSearchAgentRuntime:
 
     def _clear_cover_patch_recovery(self) -> None:
         self._cover_letter_patch_recovery = None
+        self._cover_letter_last_invalid_fingerprint = None
+        self._cover_letter_invalid_repeat_count = 0
+
+    def _deterministic_wrapper_templates(self, job: Any) -> dict[str, str]:
+        title = " ".join(str(job.title or "this role").split())
+        return {
+            "lead_in": (
+                "My background aligns with the applied responsibilities of this role."
+            ),
+            "follow_up": (
+                "This evidence demonstrates practical experience relevant to the position "
+                "and the organization's delivery requirements for evidence grounded systems."
+            ),
+        }
+
+    def _cover_letter_invalid_fingerprint(
+        self,
+        contract: dict[str, Any],
+        arguments: dict[str, Any],
+        audit: _CoverLetterAuditResult | None,
+        error: str | None,
+    ) -> str:
+        job_key = hashlib.sha256(
+            str(contract.get("target_job_id", "")).encode()
+        ).hexdigest()[:12]
+        patch_fields = ",".join(sorted(contract.get("cover_patch_fields") or []))
+        category = self._cover_letter_rejection_category(error, audit)
+        issue_codes = "|".join(
+            sorted(
+                f"{issue.field}:{issue.category}"
+                for issue in (audit.issues if audit else [])
+            )
+        )
+        normalized_args = json.dumps(
+            arguments,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        args_hash = hashlib.sha256(normalized_args.encode()).hexdigest()[:16]
+        return (
+            f"{contract.get('phase', '')}|{job_key}|{patch_fields}|{category}|"
+            f"{issue_codes}|{args_hash}"
+        )
+
+    def _try_cover_letter_deterministic_wrapper_recovery(
+        self,
+        raw_call: NormalizedToolCall,
+        contract: dict[str, Any],
+        response: NormalizedAssistantMessage,
+        audit: _CoverLetterAuditResult | None,
+    ) -> bool:
+        if not self._cover_letter_patch_recovery:
+            return False
+        patch_fields = list(
+            self._cover_letter_patch_recovery.get("patch_fields") or []
+        )
+        if not any(field.startswith("body_paragraph") for field in patch_fields):
+            return False
+        assert self.registry is not None
+        assert self.state is not None
+        target_job_id = contract.get("target_job_id")
+        if target_job_id is None:
+            return False
+        job = self.registry._job(target_job_id)
+        templates = self._deterministic_wrapper_templates(job)
+        base = copy.deepcopy(self._cover_letter_patch_recovery["base_draft"])
+        for field in patch_fields:
+            if not field.startswith("body_paragraph"):
+                continue
+            paragraph = base.get(field)
+            if not isinstance(paragraph, dict):
+                return False
+            claim = paragraph.get("selected_candidate_claim")
+            if not isinstance(claim, str) or not claim.strip():
+                return False
+            paragraph["lead_in"] = templates["lead_in"]
+            paragraph["follow_up"] = templates["follow_up"]
+            base[field] = paragraph
+        try:
+            full_contract = {**contract, "cover_patch_fields": []}
+            transport_args = self._assemble_cover_letter_transport(base, full_contract)
+            transport_audit = self._audit_cover_letter_transport(
+                transport_args,
+                contract,
+            )
+            transport_audit.raise_if_issues()
+            execution_call = self._hydrate_cover_letter_call(
+                raw_call,
+                contract,
+                transport_args=transport_args,
+            )
+            self._record_cover_hydration_diagnostics(
+                raw_call,
+                execution_call,
+                contract,
+            )
+            self._prevalidate_hydrated_cover_letter_plan(
+                execution_call.arguments["plan"],
+                target_job_id,
+            )
+            self._validate_call_for_contract(execution_call, contract)
+            baseline_arguments = self.registry.parse_arguments(
+                execution_call.name,
+                execution_call.arguments,
+            )
+            self.state.validate_tool_call(
+                execution_call.name,
+                job_id=getattr(baseline_arguments, "job_id", None),
+            )
+            self._append_assistant_message(response)
+            self._execute_model_tool_call(execution_call)
+            self._clear_cover_patch_recovery()
+            if self._last_generation_span is not None:
+                existing = self._last_generation_span.record.metadata or {}
+                self._last_generation_span.record.metadata = {
+                    **existing,
+                    "cover_letter_deterministic_wrapper_recovery_applied": True,
+                    "cover_letter_paragraph_assembled": True,
+                    "cover_letter_claim_exact_substring_verified": True,
+                }
+            return True
+        except (StateInvariantError, ToolRegistryError):
+            return False
 
     def _paragraph_uses_memory_fact(self, text: str, fact: Any) -> bool:
         normalized_text = _normalize_phrase(text)
@@ -2922,6 +3386,7 @@ class JobSearchAgentRuntime:
         if semantic.body_paragraph_2 is not None:
             paragraph_specs.append(semantic.body_paragraph_2)
         for paragraph in paragraph_specs:
+            selected_claim = getattr(paragraph, "selected_candidate_claim", None)
             body_paragraphs.append(
                 {
                     "text": paragraph.text,
@@ -2930,6 +3395,7 @@ class JobSearchAgentRuntime:
                         job_id,
                         paragraph.text,
                         skill_items,
+                        selected_claim=selected_claim,
                     ),
                 }
             )
@@ -3073,14 +3539,23 @@ class JobSearchAgentRuntime:
                         ),
                     )
                 )
-            if not self._paragraph_has_allowed_candidate_claim(text, target_job_id):
+            selected_claim = paragraph.get("selected_candidate_claim")
+            if not isinstance(selected_claim, str) or not selected_claim:
+                issues.append(
+                    _CoverLetterAuditIssue(
+                        field=field,
+                        category="draft_schema",
+                        message=f"{field} must include selected_candidate_claim",
+                    )
+                )
+            elif selected_claim not in text:
                 issues.append(
                     _CoverLetterAuditIssue(
                         field=field,
                         category="semantic_text",
                         message=(
-                            f"{field} must include at least one exact "
-                            "allowed_candidate_claim"
+                            f"{field} assembled text must contain the exact "
+                            "selected_candidate_claim"
                         ),
                     )
                 )
@@ -3340,7 +3815,7 @@ class JobSearchAgentRuntime:
             "cover_letter_compact_draft": True,
             "cover_letter_hydration_applied": True,
             "cover_letter_paragraph_citation_closure_applied": True,
-            "model_argument_mode": "cover_letter_text_draft",
+            "model_argument_mode": "cover_letter_wrapper_draft",
             "raw_model_argument_char_count": raw_size,
             "hydrated_argument_char_count": hydrated_size,
             "cover_letter_allowed_skill_count": allowed_count,
@@ -3351,9 +3826,22 @@ class JobSearchAgentRuntime:
             "cover_letter_paragraph_skill_citation_count": paragraph_skill_citation_count,
             "cover_letter_allowed_claim_count": allowed_claim_count,
             "cover_letter_exact_claim_match_count": exact_claim_match_count,
+            "cover_letter_paragraph_assembled": True,
+            "cover_letter_claim_exact_substring_verified": True,
             "phase": contract["phase"],
             "target_rank": contract.get("target_rank"),
         }
+        allowed_claims = list(contract.get("allowed_candidate_claims") or [])
+        if target_job_id and not allowed_claims:
+            allowed_claims = self._allowed_candidate_claim_texts(target_job_id)
+        diagnostics["cover_letter_claim_enum_applied"] = bool(allowed_claims)
+        paragraph = raw_call.arguments.get("body_paragraph_1")
+        if isinstance(paragraph, dict):
+            selected = paragraph.get("selected_candidate_claim")
+            if isinstance(selected, str) and selected in allowed_claims:
+                diagnostics["cover_letter_selected_claim_index"] = allowed_claims.index(
+                    selected
+                )
         allowed_hooks = list(contract.get("allowed_company_hooks") or [])
         if target_job_id and not allowed_hooks:
             allowed_hooks = self._select_allowed_company_hooks(target_job_id)
@@ -3639,6 +4127,7 @@ class JobSearchAgentRuntime:
         if allowed_tool == "generate_cover_letter":
             target_job_id = contract.get("target_job_id")
             allowed_hooks = list(contract.get("allowed_company_hooks") or [])
+            allowed_claims = list(contract.get("allowed_candidate_claims") or [])
             if target_job_id and not allowed_hooks:
                 allowed_hooks, fallback_used = self._ensure_allowed_company_hooks_for_job(
                     target_job_id
@@ -3648,9 +4137,13 @@ class JobSearchAgentRuntime:
                     "allowed_company_hooks": allowed_hooks,
                     "cover_letter_hook_extraction_fallback_used": fallback_used,
                 }
+            if target_job_id and not allowed_claims:
+                allowed_claims = self._allowed_candidate_claim_texts(target_job_id)
+                contract = {**contract, "allowed_candidate_claims": allowed_claims}
             draft_model = self._cover_letter_schema_model_for_contract(contract)
             schema = draft_model.model_json_schema()
             schema = self._apply_cover_hook_enum_to_schema(schema, allowed_hooks)
+            schema = self._apply_cover_claim_enum_to_schema(schema, allowed_claims)
             if contract.get("cover_patch_fields"):
                 schema["required"] = sorted(schema.get("properties", {}).keys())
             return [
@@ -4132,6 +4625,9 @@ class JobSearchAgentRuntime:
         if allowed_tool == "generate_cover_letter":
             contract["allowed_company_hooks"] = allowed_hooks
             contract["cover_letter_hook_extraction_fallback_used"] = fallback_used
+            contract["allowed_candidate_claims"] = self._allowed_candidate_claim_texts(
+                target_job_id
+            )
         if allowed_tool == "tailor_resume":
             assert target_job_id is not None
             job = self.registry._job(target_job_id)
@@ -4477,6 +4973,22 @@ class JobSearchAgentRuntime:
                         "cover_letter_audit_fields": audit.fields,
                     }
                 audit.raise_if_issues()
+                if self._last_generation_span is not None:
+                    existing = self._last_generation_span.record.metadata or {}
+                    allowed_claims = self._allowed_claims_for_contract(contract)
+                    selected_index = None
+                    paragraph = transport_args.get("body_paragraph_1")
+                    if isinstance(paragraph, dict):
+                        selected = paragraph.get("selected_candidate_claim")
+                        if isinstance(selected, str) and selected in allowed_claims:
+                            selected_index = allowed_claims.index(selected)
+                    self._last_generation_span.record.metadata = {
+                        **existing,
+                        "cover_letter_paragraph_assembled": True,
+                        "cover_letter_claim_enum_applied": bool(allowed_claims),
+                        "cover_letter_selected_claim_index": selected_index,
+                        "cover_letter_claim_exact_substring_verified": True,
+                    }
                 execution_call = self._hydrate_cover_letter_call(
                     raw_call,
                     contract,
@@ -4568,21 +5080,96 @@ class JobSearchAgentRuntime:
                         )
                     except (StateInvariantError, ToolRegistryError):
                         try:
-                            if self._is_complete_cover_draft(raw_call.arguments):
-                                structure = self._parse_cover_letter_transport_structure(
-                                    raw_call.arguments
+                            wrapper = self._parse_cover_letter_wrapper_draft(
+                                raw_call.arguments,
+                                contract,
+                            )
+                            wrapper_issues: list[_CoverLetterAuditIssue] = []
+                            allowed_claims = self._allowed_claims_for_contract(
+                                contract
+                            )
+                            for field in ("body_paragraph_1", "body_paragraph_2"):
+                                paragraph = wrapper.get(field)
+                                if isinstance(paragraph, dict):
+                                    wrapper_issues.extend(
+                                        self._audit_paragraph_wrapper_segments(
+                                            paragraph,
+                                            field,
+                                            contract.get("target_job_id", ""),
+                                            allowed_claims,
+                                        )
+                                    )
+                            if wrapper_issues:
+                                audit = _CoverLetterAuditResult(issues=wrapper_issues)
+                            else:
+                                transport_args = self._assemble_cover_letter_transport(
+                                    wrapper,
+                                    {**contract, "cover_patch_fields": []},
                                 )
-                                transport_args = structure.model_dump(mode="json")
                                 audit = self._audit_cover_letter_transport(
                                     transport_args,
                                     contract,
                                 )
                         except (StateInvariantError, ToolRegistryError):
                             audit = None
+                fingerprint = self._cover_letter_invalid_fingerprint(
+                    contract,
+                    raw_call.arguments,
+                    audit if isinstance(audit, _CoverLetterAuditResult) else None,
+                    error,
+                )
+                if fingerprint == self._cover_letter_last_invalid_fingerprint:
+                    self._cover_letter_invalid_repeat_count += 1
+                else:
+                    self._cover_letter_last_invalid_fingerprint = fingerprint
+                    self._cover_letter_invalid_repeat_count = 1
+                if self._cover_letter_invalid_repeat_count >= 2:
+                    if self._cover_letter_duplicate_wrapper_failure(contract, audit):
+                        if self._last_generation_span is not None:
+                            existing = self._last_generation_span.record.metadata or {}
+                            self._last_generation_span.record.metadata = {
+                                **existing,
+                                "cover_letter_duplicate_invalid_detected": True,
+                            }
+                        if self._try_cover_letter_deterministic_wrapper_recovery(
+                            raw_call,
+                            contract,
+                            response,
+                            audit if isinstance(audit, _CoverLetterAuditResult) else None,
+                        ):
+                            return 1, 0
+                        affected_field = (
+                            audit.fields[0]
+                            if isinstance(audit, _CoverLetterAuditResult) and audit.fields
+                            else "body_paragraph_1"
+                        )
+                        self._record_invalid(tool_call=raw_call, error=error)
+                        if self._last_generation_span is not None:
+                            existing = self._last_generation_span.record.metadata or {}
+                            self._last_generation_span.record.metadata = {
+                                **existing,
+                                "cover_letter_duplicate_invalid_stopped": True,
+                            }
+                        raise DuplicateInvalidOutputError(
+                            "Cover letter duplicate invalid output stopped for "
+                            f"{affected_field}"
+                        )
+                if isinstance(audit, _CoverLetterAuditResult) and audit.issues:
+                    wrapper_fields = {
+                        issue.field
+                        for issue in audit.issues
+                        if issue.field.startswith("body_paragraph")
+                    }
+                    if wrapper_fields and self._last_generation_span is not None:
+                        existing = self._last_generation_span.record.metadata or {}
+                        self._last_generation_span.record.metadata = {
+                            **existing,
+                            "cover_letter_paragraph_wrapper_rejected": True,
+                        }
                 self._prepare_cover_patch_recovery(
                     raw_call,
                     contract,
-                    audit=audit,
+                    audit=audit if isinstance(audit, _CoverLetterAuditResult) else None,
                     error=error,
                 )
                 if self._cover_letter_patch_recovery:

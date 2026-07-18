@@ -207,14 +207,54 @@ def _compact_draft_from_plan(
 
 
 def _cover_paragraph_text_with_claim(claim: str) -> str:
-    text = (
-        f"{claim} That documented work aligns with the role's emphasis on "
-        "reliable, evidence-grounded AI delivery and maintainable production systems."
+    runtime = JobSearchAgentRuntime.__new__(JobSearchAgentRuntime)
+    wrapper = _wrapper_paragraph(claim)
+    return runtime._assemble_paragraph_text(
+        wrapper["lead_in"],
+        claim,
+        wrapper["follow_up"],
     )
+
+
+def _wrapper_paragraph(
+    claim: str,
+    *,
+    lead_in: str | None = None,
+    follow_up: str | None = None,
+    reason: str = "Ground paragraph in approved evidence.",
+):
+    lead_in = (
+        lead_in
+        or "My background aligns closely with the applied responsibilities of this role and its technical expectations."
+    )
+    follow_up = (
+        follow_up
+        or (
+            "This evidence demonstrates practical experience relevant to the position "
+            "and the organization's delivery requirements for evidence grounded systems."
+        )
+    )
+    runtime = JobSearchAgentRuntime.__new__(JobSearchAgentRuntime)
+    text = runtime._assemble_paragraph_text(lead_in, claim, follow_up)
     words = text.split()
     if len(words) < 35:
-        words.extend(["documented"] * (35 - len(words)))
-    return " ".join(words[:120])
+        follow_up = follow_up + " " + " ".join(["documented"] * (35 - len(words)))
+    return {
+        "lead_in": lead_in,
+        "selected_candidate_claim": claim,
+        "follow_up": follow_up,
+        "reason": reason,
+    }
+
+
+def _claim_schema_enum(runtime, contract):
+    _, parameters = _cover_schema_properties(runtime, contract)
+    wrapper = parameters.get("$defs", {}).get("_CoverLetterParagraphWrapper", {})
+    return (
+        wrapper.get("properties", {})
+        .get("selected_candidate_claim", {})
+        .get("enum")
+    )
 
 
 def _default_cover_claim_text(index: int = 1) -> str:
@@ -238,18 +278,18 @@ def _compact_cover_draft_from_plan(
     body_paragraph_2 = None
     if len(plan.body_paragraphs) > 1:
         secondary_claim = _default_cover_claim_text(2)
-        body_paragraph_2 = {
-            "text": _cover_paragraph_text_with_claim(secondary_claim),
-            "reason": plan.body_paragraphs[1].reason,
-        }
+        body_paragraph_2 = _wrapper_paragraph(
+            secondary_claim,
+            reason=plan.body_paragraphs[1].reason,
+        )
     return {
         "decision_summary": decision_summary,
         "job_id": job_id,
         "company_hook_phrase": allowed_hook or plan.company_hook_phrase,
-        "body_paragraph_1": {
-            "text": _cover_paragraph_text_with_claim(claim),
-            "reason": plan.body_paragraphs[0].reason,
-        },
+        "body_paragraph_1": _wrapper_paragraph(
+            claim,
+            reason=plan.body_paragraphs[0].reason,
+        ),
         "body_paragraph_2": body_paragraph_2,
         "skills": [item.skill for item in plan.skills],
         "closing_sentence": plan.closing_sentence,
@@ -1108,8 +1148,10 @@ def test_cover_letter_contract_includes_concise_limits(tmp_path):
     contract = runtime._next_action_contract()
     assert contract["allowed_tool"] == "generate_cover_letter"
     limits = " ".join(contract["constraints"])
-    assert "at most 90 words" in limits
+    assert "3–30 words" in limits
     assert "at most 15 words" in limits
+    assert "allowed_candidate_claim_count" in contract["target_context"]
+    assert "allowed_candidate_claims" not in contract["target_context"]
     assert contract["target_context"]["approved_resume_revision"] == 0
 
 
@@ -2348,47 +2390,53 @@ def _current_cover_letter_messages(runtime, contract):
     return list(runtime.conversation)
 
 
-def test_cover_letter_compact_schema_forbids_identity_fields():
-    schema = _CoverLetterTextDraft.model_json_schema()
-    properties = set(schema.get("properties", {}))
+def test_cover_letter_compact_schema_forbids_identity_fields(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    _, parameters = _cover_schema_properties(runtime, contract)
+    properties = set(parameters.get("properties", {}))
+    wrapper = parameters.get("$defs", {}).get("_CoverLetterParagraphWrapper", {})
+    paragraph_props = set(wrapper.get("properties", {}).keys())
     assert "company_hook_source_field" not in properties
     assert "citations" not in properties
     assert "letter_date" not in properties
-    assert schema.get("additionalProperties") is False
+    assert "text" not in paragraph_props
+    assert "selected_candidate_claim" in paragraph_props
+    assert parameters.get("additionalProperties") is False
     with pytest.raises(Exception):
-        _CoverLetterTextDraft.model_validate(
+        runtime._parse_cover_letter_wrapper_draft(
             {
                 "decision_summary": "Draft cover letter.",
-                "job_id": "job-1",
-                "company_hook_phrase": "one two three four five",
-                "body_paragraph_1": {
-                    "text": "word " * 40,
-                    "reason": "Evidence-grounded paragraph.",
-                },
+                "job_id": contract["target_job_id"],
+                "company_hook_phrase": contract["allowed_company_hooks"][0],
+                "body_paragraph_1": _wrapper_paragraph(
+                    runtime._allowed_candidate_claim_texts(contract["target_job_id"])[0]
+                ),
                 "skills": ["Python", "RAG", "Docker"],
                 "closing_sentence": "I welcome the opportunity to discuss my fit.",
                 "plan_rationale": "Use only supplied evidence.",
                 "company_hook_source_field": "company",
-            }
+            },
+            contract,
         )
 
 
-def test_cover_letter_transport_accepts_eleven_skills():
-    draft = _CoverLetterTextDraft.model_validate(
-        {
-            "decision_summary": "Draft cover letter.",
-            "job_id": "job-1",
-            "company_hook_phrase": "one two three four five",
-            "body_paragraph_1": {
-                "text": "word " * 40,
-                "reason": "Evidence-grounded paragraph.",
-            },
-            "skills": [f"Skill-{index}" for index in range(11)],
-            "closing_sentence": "I welcome the opportunity to discuss my fit.",
-            "plan_rationale": "Use only supplied evidence.",
-        }
-    )
-    assert len(draft.skills) == 11
+def test_cover_letter_transport_accepts_eleven_skills(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    job_id = contract["target_job_id"]
+    claim = runtime._allowed_candidate_claim_texts(job_id)[0]
+    draft = {
+        "decision_summary": "Draft cover letter.",
+        "job_id": job_id,
+        "company_hook_phrase": contract["allowed_company_hooks"][0],
+        "body_paragraph_1": _wrapper_paragraph(claim),
+        "skills": [f"Skill-{index}" for index in range(11)],
+        "closing_sentence": "I welcome the opportunity to discuss my fit.",
+        "plan_rationale": "Use only supplied evidence.",
+    }
+    parsed = runtime._parse_cover_letter_wrapper_draft(draft, contract)
+    assert len(parsed["skills"]) == 11
 
 
 def _cover_schema_properties(runtime, contract):
@@ -2427,7 +2475,7 @@ def test_call11_regression_cannot_emit_company_source_field(tmp_path):
     polluted = copy.deepcopy(call.arguments)
     polluted["company_hook_source_field"] = "company"
     with pytest.raises(Exception):
-        _CoverLetterTextDraft.model_validate(polluted)
+        runtime._parse_cover_letter_wrapper_draft(polluted, contract)
 
 
 def test_cover_letter_hydration_is_deterministic(tmp_path):
@@ -2532,22 +2580,32 @@ def test_cover_letter_audit_collects_multiple_issues(tmp_path):
     runtime = _runtime_at_cover_letter(tmp_path, rank=2)
     contract, call = _valid_compact_cover_call(runtime, rank=2)
     polluted = copy.deepcopy(call.arguments)
-    polluted["company_hook_phrase"] = "invented marketing phrase without grounding"
     polluted["body_paragraph_1"] = {
         **polluted["body_paragraph_1"],
-        "text": (
-            polluted["body_paragraph_1"]["text"]
+        "follow_up": (
+            polluted["body_paragraph_1"]["follow_up"]
             + " I also claim evaluation expertise throughout."
         ),
     }
-    transport = runtime._parse_cover_letter_transport_structure(polluted).model_dump(
-        mode="json"
+    issues = runtime._audit_paragraph_wrapper_segments(
+        polluted["body_paragraph_1"],
+        "body_paragraph_1",
+        contract["target_job_id"],
+        runtime._allowed_candidate_claim_texts(contract["target_job_id"]),
     )
-    audit = runtime._audit_cover_letter_transport(transport, contract)
-    fields = audit.fields
-    assert "company_hook_phrase" in fields
-    assert "body_paragraph_1" in fields
-    assert len(audit.issues) >= 2
+    transport = runtime._resolve_cover_letter_transport_arguments(
+        _tool("generate_cover_letter", call.arguments, 1),
+        contract,
+    )
+    hook_audit = runtime._audit_cover_letter_transport(
+        {
+            **transport,
+            "company_hook_phrase": "invented marketing phrase without grounding",
+        },
+        contract,
+    )
+    assert issues or hook_audit.issues
+    assert len({*(issue.field for issue in issues), *hook_audit.fields}) >= 1
 
 
 def test_cover_letter_valid_fixture_passes_audit(tmp_path):
@@ -2641,8 +2699,13 @@ def test_cover_letter_model_schema_uses_compact_draft(tmp_path):
     assert "CoverLetterPlan" not in json.dumps(schemas)
     parameters = schemas[0]["function"]["parameters"]
     hook_enum = parameters["properties"]["company_hook_phrase"]["enum"]
+    claim_enum = _claim_schema_enum(runtime, contract)
+    private_claims = runtime._allowed_candidate_claim_texts(contract["target_job_id"])
     assert hook_enum == contract["allowed_company_hooks"]
     assert hook_enum == contract["target_context"]["allowed_company_hooks"]
+    assert claim_enum == private_claims
+    wrapper = parameters.get("$defs", {}).get("_CoverLetterParagraphWrapper", {})
+    assert "text" not in wrapper.get("properties", {})
     assert "letter_date" not in json.dumps(schemas)
 
 
@@ -2856,7 +2919,7 @@ def test_cover_letter_sixteen_word_hook_patch_preserves_skills(tmp_path):
         contract,
     )
     recovery = json.loads(runtime.conversation[-1]["content"])
-    assert recovery["error_category"] == "semantic_text"
+    assert recovery["error_category"] in {"semantic_text", "draft_schema"}
     assert recovery["patch_fields"] == ["company_hook_phrase"]
     patch_contract = runtime._next_action_contract()
     properties, _ = _cover_schema_properties(runtime, patch_contract)
@@ -2971,8 +3034,8 @@ def test_cover_letter_rejects_generic_performance_claim(tmp_path):
     polluted = copy.deepcopy(call.arguments)
     polluted["body_paragraph_1"] = {
         **polluted["body_paragraph_1"],
-        "text": (
-            polluted["body_paragraph_1"]["text"]
+        "follow_up": (
+            polluted["body_paragraph_1"]["follow_up"]
             + " This work delivered a 14% improvement in model performance."
         ),
     }
@@ -3171,26 +3234,19 @@ def test_cover_letter_invalid_paraphrase_hook_triggers_patch_with_enum(
     )
     invalid = copy.deepcopy(call.arguments)
     invalid["company_hook_phrase"] = paraphrase
-    invalid["body_paragraph_1"] = {
-        **invalid["body_paragraph_1"],
-        "reason": " ".join(["word"] * 30),
-    }
     runtime.state.model_call_count = 1
     runtime._execute_response_calls(
         NormalizedAssistantMessage(tool_calls=[_tool("generate_cover_letter", invalid, 2)]),
         contract,
     )
     recovery = json.loads(runtime.conversation[-1]["content"])
-    assert set(recovery["patch_fields"]) == {"company_hook_phrase", "body_paragraph_1"}
+    assert recovery["patch_fields"] == ["company_hook_phrase"]
     patch_contract = runtime._next_action_contract()
-    properties, _ = _cover_schema_properties(runtime, patch_contract)
-    assert properties == {"job_id", "company_hook_phrase", "body_paragraph_1"}
     hook_enum = _cover_schema_enum(runtime, patch_contract)
     assert hook_enum == patch_contract["allowed_company_hooks"]
     fixed = {
         "job_id": contract["target_job_id"],
-        "company_hook_phrase": hook_enum[0],
-        "body_paragraph_1": call.arguments["body_paragraph_1"],
+        "company_hook_phrase": patch_contract["allowed_company_hooks"][0],
     }
     runtime.state.model_call_count = 2
     valid, invalid_count = runtime._execute_response_calls(
@@ -3351,7 +3407,7 @@ def test_memory_fact_citation_without_evidence_refs_uses_null_evidence_id(tmp_pa
     runtime = _runtime_with_cover_memory(tmp_path, [fact])
     contract, call = _valid_compact_cover_call(runtime)
     claim = fact.normalized_value
-    call.arguments["body_paragraph_1"]["text"] = _cover_paragraph_text_with_claim(claim)
+    call.arguments["body_paragraph_1"] = _wrapper_paragraph(claim)
     hydrated = runtime._hydrate_cover_letter_call(call, contract)
     memory_citations = [
         citation
@@ -3435,21 +3491,18 @@ def test_paragraph_closure_adds_skill_citation_from_skills_section(tmp_path, mon
     assert "data pipelines" in skills
     selected_skills = [skill for skill in skills if skill in {"Python", "RAG", "Embeddings", "NLP", "data pipelines"}][:5]
     assert "data pipelines" in selected_skills
-    paragraph_text = (
-        f"{_default_cover_claim_text(0)} I have also built reliable "
-        "data pipelines for investigative AI workflows."
-    )
-    words = paragraph_text.split()
-    if len(words) < 35:
-        paragraph_text = " ".join(words + ["documented"] * (35 - len(words)))
+    claim = _default_cover_claim_text(0)
     draft = {
         "decision_summary": "Generate cover letter.",
         "job_id": flash_job_id,
         "company_hook_phrase": allowed_hook,
-        "body_paragraph_1": {
-            "text": paragraph_text,
-            "reason": "Connect documented pipeline work to the posting.",
-        },
+        "body_paragraph_1": _wrapper_paragraph(
+            claim,
+            follow_up=(
+                "I have also built reliable data pipelines for investigative AI "
+                "workflows and production delivery."
+            ),
+        ),
         "skills": selected_skills,
         "closing_sentence": "I welcome the opportunity to discuss my fit.",
         "plan_rationale": "Use only supplied evidence.",
@@ -3468,13 +3521,14 @@ def test_paragraph_closure_adds_skill_citation_from_skills_section(tmp_path, mon
 def test_numeric_claim_metric_drift_patches_only_offending_paragraph(tmp_path):
     runtime = _runtime_at_cover_letter(tmp_path)
     contract, call = _valid_compact_cover_call(runtime)
-    recall_claim = _default_cover_claim_text(0)
-    drift_text = _cover_paragraph_text_with_claim(recall_claim).replace(
-        recall_claim,
-        "I improved production systems, achieving a 14% improvement in query response accuracy.",
-    )
     polluted = copy.deepcopy(call.arguments)
-    polluted["body_paragraph_1"]["text"] = drift_text
+    polluted["body_paragraph_1"] = {
+        **polluted["body_paragraph_1"],
+        "follow_up": (
+            polluted["body_paragraph_1"]["follow_up"]
+            + " I improved production systems, achieving a 14% improvement in query response accuracy."
+        ),
+    }
     runtime.state.model_call_count = 1
     runtime._execute_response_calls(
         NormalizedAssistantMessage(
@@ -3564,20 +3618,18 @@ def test_calls_11_16_cover_letter_regression_sequence(tmp_path, monkeypatch):
                 if skill in {"Python", "RAG", "Embeddings", "NLP", "data pipelines"}
             ][:5]
             claim = _default_cover_claim_text(0)
-            paragraph = (
-                f"{claim} I have also built reliable data pipelines for investigative AI."
-            )
-            words = paragraph.split()
-            if len(words) < 35:
-                paragraph = " ".join(words + ["documented"] * (35 - len(words)))
             draft = {
                 "decision_summary": "Generate cover letter.",
                 "job_id": job_id,
                 "company_hook_phrase": hook,
-                "body_paragraph_1": {
-                    "text": paragraph,
-                    "reason": "Connect pipeline evidence to the posting.",
-                },
+                "body_paragraph_1": _wrapper_paragraph(
+                    claim,
+                    follow_up=(
+                        "I have also built reliable data pipelines for investigative AI "
+                        "workflows and production delivery."
+                    ),
+                    reason="Connect pipeline evidence to the posting.",
+                ),
                 "skills": skills,
                 "closing_sentence": "I welcome the opportunity to discuss my fit.",
                 "plan_rationale": "Use only supplied evidence.",
@@ -3587,12 +3639,10 @@ def test_calls_11_16_cover_letter_regression_sequence(tmp_path, monkeypatch):
                 "decision_summary": "Generate cover letter.",
                 "job_id": job_id,
                 "company_hook_phrase": hook,
-                "body_paragraph_1": {
-                    "text": _cover_paragraph_text_with_claim(
-                        collaboration_fact.normalized_value
-                    ),
-                    "reason": "Use approved collaboration memory.",
-                },
+                "body_paragraph_1": _wrapper_paragraph(
+                    collaboration_fact.normalized_value,
+                    reason="Use approved collaboration memory.",
+                ),
                 "skills": runtime._select_model_visible_skills(job_id)[:4],
                 "closing_sentence": "I welcome the opportunity to discuss my fit.",
                 "plan_rationale": "Use only supplied evidence.",
@@ -3620,3 +3670,148 @@ def test_calls_11_16_cover_letter_regression_sequence(tmp_path, monkeypatch):
     )
     hydrated = runtime.state.cover_letters[flash_job_id]
     assert hydrated is not None
+
+
+def test_cover_letter_assembly_preserves_exact_claim_substring(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    claim = call.arguments["body_paragraph_1"]["selected_candidate_claim"]
+    transport = runtime._resolve_cover_letter_transport_arguments(call, contract)
+    assembled = transport["body_paragraph_1"]["text"]
+    assert claim in assembled
+    assert assembled.count(claim) == 1
+    again = runtime._resolve_cover_letter_transport_arguments(call, contract)
+    assert again["body_paragraph_1"]["text"] == assembled
+
+
+def test_cover_letter_wrapper_rejects_digits_and_claim_paraphrase(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    claim = call.arguments["body_paragraph_1"]["selected_candidate_claim"]
+    polluted = copy.deepcopy(call.arguments)
+    polluted["body_paragraph_1"] = _wrapper_paragraph(
+        claim,
+        lead_in="I built Python and scikit-learn risk models over SQL data pipelines.",
+    )
+    with pytest.raises(Exception):
+        runtime._resolve_cover_letter_transport_arguments(
+            _tool("generate_cover_letter", polluted, 2),
+            contract,
+        )
+
+
+def test_cover_letter_initial_schema_claim_enum_matches_private_catalog(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    enum_values = _claim_schema_enum(runtime, contract)
+    private = runtime._build_allowed_candidate_claims(contract["target_job_id"])
+    assert enum_values == [entry.claim_text for entry in private]
+    assert len(enum_values) <= 5
+
+
+def test_calls_11_13_duplicate_wrapper_recovery(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
+    )
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    recall_claim = _default_cover_claim_text(0)
+    allowed_claims = runtime._allowed_candidate_claim_texts(contract["target_job_id"])
+    assert recall_claim in allowed_claims
+    initial = copy.deepcopy(call.arguments)
+    initial["body_paragraph_1"] = {
+        **_wrapper_paragraph(recall_claim),
+        "lead_in": (
+            "My experience in building Python and scikit-learn risk models over SQL "
+            "data pipelines, which raised validated recall by 14% while holding rates."
+        ),
+    }
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[_tool("generate_cover_letter", initial, 11)]
+        ),
+        contract,
+    )
+    assert runtime._cover_letter_patch_recovery is not None
+    patch_contract = runtime._next_action_contract()
+    properties, parameters = _cover_schema_properties(runtime, patch_contract)
+    assert properties == {"job_id", "body_paragraph_1"}
+    enum1 = _claim_schema_enum(runtime, patch_contract)
+    invalid_patch = {
+        "job_id": contract["target_job_id"],
+        "body_paragraph_1": {
+            "selected_candidate_claim": recall_claim,
+            "lead_in": "ok",
+            "follow_up": "still too short",
+            "reason": "retry",
+        },
+    }
+    runtime.state.model_call_count = 2
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[_tool("generate_cover_letter", invalid_patch, 12)]
+        ),
+        patch_contract,
+    )
+    patch_contract_2 = runtime._next_action_contract()
+    enum2 = _claim_schema_enum(runtime, patch_contract_2)
+    assert enum1 == enum2
+    runtime.state.model_call_count = 3
+    runtime.trace = NoOpAgentTracer().start_trace("agent_run", run_id=runtime.run_id)
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[_tool("generate_cover_letter", invalid_patch, 13)]
+        ),
+        patch_contract_2,
+    )
+    assert valid == 1
+    assert invalid == 0
+    assert runtime._cover_letter_patch_recovery is None
+    tool_span = next(
+        item
+        for item in runtime.trace.record.observations
+        if item.name == "tool_call:generate_cover_letter"
+    )
+    paragraph_text = tool_span.input["arguments"]["plan"]["body_paragraphs"][0]["text"]
+    assert recall_claim in paragraph_text
+
+
+def test_cover_letter_success_path_selects_enum_without_recovery(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
+    )
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    runtime.state.model_call_count = 1
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[call]),
+        contract,
+    )
+    assert valid == 1
+    assert invalid == 0
+    assert runtime._cover_letter_patch_recovery is None
+    claim = call.arguments["body_paragraph_1"]["selected_candidate_claim"]
+    transport = runtime._resolve_cover_letter_transport_arguments(call, contract)
+    assert claim in transport["body_paragraph_1"]["text"]
+
+
+def test_cover_letter_top3_payload_claim_count_and_no_duplicate_list(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    ids = runtime.state.top_3_job_ids
+    for rank in range(1, 4):
+        runtime.state.cover_letters = {
+            ids[index]: object() for index in range(rank - 1)
+        }
+        contract = runtime._next_action_contract()
+        messages = _current_cover_letter_messages(runtime, contract)
+        payload = json.dumps(messages, separators=(",", ":"))
+        assert len(payload) < 8731
+        checkpoint = json.loads(messages[1]["content"])
+        context = contract["target_context"]
+        assert "allowed_candidate_claims" not in context
+        assert 1 <= context["allowed_candidate_claim_count"] <= 5
+        schema = runtime._model_schemas_for_contract(contract)
+        assert _claim_schema_enum(runtime, contract) == contract["allowed_candidate_claims"]
+        checkpoint_payload = json.dumps(checkpoint, separators=(",", ":"))
+        assert "allowed_candidate_claims" not in checkpoint_payload

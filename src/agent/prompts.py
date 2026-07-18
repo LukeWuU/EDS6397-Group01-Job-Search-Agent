@@ -203,29 +203,36 @@ COVER_LETTER_PLAN_LIMITS = [
     "closing_sentence: at most 25 words",
     "plan_rationale: at most 25 words",
     "Include between 3 and 8 skills.",
-    "Each body paragraph must include at least one exact allowed_candidate_claim.",
-    "Copy numeric allowed_candidate_claims character-for-character.",
+    "Each body paragraph is assembled from lead_in, selected_candidate_claim, and follow_up.",
     "Return exactly one tool call with no prose outside the tool call.",
 ]
 
 COVER_LETTER_NORMAL_CONSTRAINTS = [
-    "Return exactly one generate_cover_letter tool call with semantic text fields only.",
+    "Return exactly one generate_cover_letter tool call with semantic wrapper fields only.",
     "job_id must equal TARGET_JOB_ID.",
     "Write company_hook_phrase only; Python sets company_hook_source_field.",
-    "Provide body_paragraph_1 and optional body_paragraph_2 with text and reason only.",
+    (
+        "Provide body_paragraph_1 and optional body_paragraph_2 with lead_in, "
+        "selected_candidate_claim, follow_up, and reason only."
+    ),
     (
         "Select exactly one company_hook_phrase from target_context.allowed_company_hooks. "
         "Copy it character-for-character. Do not paraphrase, shorten, expand, combine, "
         "or rewrite it."
     ),
     (
-        "Each body paragraph must include at least one exact claim from "
-        "target_context.allowed_candidate_claims. Copy the claim text "
-        "character-for-character, especially numeric metrics, qualifiers, and outcomes."
+        "Select exactly one value from the selected_candidate_claim enum in the tool "
+        "schema. Do not repeat, paraphrase, summarize, shorten, or expand it in lead_in "
+        "or follow_up."
+    ),
+    (
+        "lead_in and follow_up must contain no digits, no percent signs, no bullet "
+        "markers, and no candidate metrics. Python inserts the exact selected claim "
+        "between them."
     ),
     (
         "Do not reinterpret numeric claims. Never change recall, lookup time, retrieval, "
-        "MAE, or other documented metrics when reusing a number from allowed_candidate_claims."
+        "MAE, or other documented metrics when selecting a claim enum value."
     ),
     (
         "Choose 3–8 skills only from the provided allowed_skills list. Do not copy "
@@ -239,7 +246,7 @@ COVER_LETTER_NORMAL_CONSTRAINTS = [
     "Python injects citations, evidence IDs, source fields, letter_date, and nested plan.",
     "Never author citation objects, source IDs, source fields, or evidence IDs.",
     (
-        "company_hook_phrase: at most 15 words; each body paragraph text: at most 90 "
+        "company_hook_phrase: at most 15 words; lead_in: 3–30 words; follow_up: 5–45 "
         "words; each reason: at most 18 words; closing_sentence: at most 25 words; "
         "plan_rationale: at most 25 words."
     ),
