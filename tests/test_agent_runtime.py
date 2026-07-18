@@ -506,7 +506,7 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     assert "constraints" not in first_recovery
     assert "exact_tailor_resume_structural_template" not in first_recovery
     first_checkpoint = json.loads(client.calls[6]["messages"][1]["content"])
-    assert first_checkpoint["target_context"]["project_swap"] is None
+    assert first_checkpoint["target_context"]["project_swap_required"] is False
     contracts = []
     for call in client.calls:
         contracts.append(_checkpoint_contract_from_messages(call["messages"]))
@@ -534,7 +534,7 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     first_tailoring_context = tailoring_checkpoint["target_context"]
     assert first_tailoring_context["target_job_id"] == scores[0].job_id
     assert first_tailoring_context["rank"] == 1
-    assert first_tailoring_context["project_swap"] is None
+    assert first_tailoring_context["project_swap_required"] is False
     assert "citation_contract" not in first_tailoring_context
     assert "bullet_1_source" in first_tailoring_context
     assert "36%" in json.dumps(first_tailoring_context["bullet_2_source"])
@@ -625,7 +625,7 @@ def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
     assert first_contract["target_job_id"] == ids[0]
     assert first_contract["target_rank"] == 1
     assert first_contract["initial_draft"] is True
-    assert first_contract["target_context"]["project_swap"] is None
+    assert first_contract["target_context"]["project_swap_required"] is False
     assert first_contract["required_argument_shape"]["job_id"] == ids[0]
     assert "edit_plan" not in first_contract["required_argument_shape"]
     assert "bullet_1" in first_contract["required_argument_shape"]
@@ -1338,14 +1338,18 @@ def test_semantic_text_recovery_after_role_phrase_failure(tmp_path):
     assert recovery["type"] == "invalid_tool_call_recovery"
     assert recovery["error_category"] == "semantic_text"
     assert recovery["required_role_phrase"] == "AI engineer"
+    assert recovery["tailor_recovery_mode"] == "patch"
+    assert recovery["patch_fields"] == ["professional_summary"]
     assert recovery["instruction"].count('"AI engineer"') == 1
-    assert "Revise semantic text only" in recovery["instruction"]
-    assert "required_argument_shape" not in recovery
+    assert "patch call" in recovery["instruction"]
+    assert "professional_summary" in recovery["required_argument_shape"]
+    assert "bullet_1" not in recovery["required_argument_shape"]
     assert len(runtime.conversation) == 3
     assert "Validation category: semantic_text" in progress
     assert "Validation category: citation" not in progress
 
     contract2, call2 = _valid_compact_tailor_call(runtime)
+    runtime._clear_tailor_patch_recovery()
     hydrated1 = runtime._hydrate_tailor_resume_call(call, contract)
     hydrated2 = runtime._hydrate_tailor_resume_call(call2, contract2)
     assert (
@@ -1396,20 +1400,30 @@ def test_hydrated_compact_draft_executes_resume_tool(tmp_path, monkeypatch):
 
 def test_first_tailoring_payload_is_deduplicated_and_smaller(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
+    ids = runtime.state.top_3_job_ids
+    sizes: list[int] = []
+    for rank in range(1, 4):
+        runtime.state.phase = AgentPhase.TAILORING
+        runtime.state.draft_resumes = {
+            ids[index]: object() for index in range(rank - 1)
+        }
+        contract = runtime._next_action_contract()
+        current_messages = _current_tailoring_messages(runtime, contract)
+        sizes.append(len(json.dumps(current_messages, separators=(",", ":"))))
+        serialized = json.dumps(current_messages)
+        assert '"source_type"' not in serialized
+        assert '"evidence_id"' not in serialized
+    assert max(sizes) < 8731
     contract = _tailoring_contract(runtime)
-    current_messages = _current_tailoring_messages(runtime, contract)
     legacy_messages = _legacy_duplicated_tailoring_messages(runtime, contract)
+    current_messages = _current_tailoring_messages(runtime, contract)
     current_size = len(json.dumps(current_messages, separators=(",", ":")))
     legacy_size = len(json.dumps(legacy_messages, separators=(",", ":")))
     reduction = 1 - (current_size / legacy_size)
     assert reduction >= 0.30
-    assert current_size < 8731
     checkpoint = json.loads(current_messages[1]["content"])
     shape = checkpoint["next_action_contract"]["required_argument_shape"]
     assert "edit_plan" not in shape
-    serialized = json.dumps(current_messages)
-    assert '"source_type"' not in serialized
-    assert '"evidence_id"' not in serialized
     assert checkpoint["target_context"]["target_job_id"] == contract["target_job_id"]
     assert "target_context" not in checkpoint["next_action_contract"]
     schemas = runtime._model_schemas_for_contract(contract)
@@ -1467,6 +1481,8 @@ def test_model_call_payload_diagnostics_are_recorded_not_in_messages(tmp_path):
     assert generation.metadata["model_argument_mode"] == "tailor_resume_text_draft"
     assert generation.metadata["semantic_bullet_slot_mode"] == "named"
     assert generation.metadata["required_role_phrase"] == "AI engineer"
+    assert generation.metadata["evidence_reconciliation_applied"] is True
+    assert "reconciled_aligned_skill_count" in generation.metadata
     assert "model_message_count" not in runtime.conversation[-1]["content"]
 
 
@@ -1514,10 +1530,10 @@ def test_evidence_recovery_for_transferred_metric(tmp_path, monkeypatch):
     assert invalid == 1
     recovery = json.loads(runtime.conversation[-1]["content"])
     assert recovery["error_category"] == "evidence"
+    assert recovery["tailor_recovery_mode"] == "patch"
+    assert "bullet_1" in recovery["patch_fields"]
     assert recovery["rejected_bullet_slot"] == "bullet_1"
     assert "bullet_1_source" in recovery
-    assert "bullet_2_source" not in recovery
-    assert "14%" in json.dumps(recovery["bullet_1_source"]["allowed_numeric_claims"])
     assert "36%" in recovery["error"]
     assert "Validation category: evidence" in progress
     assert "Validation category: citation" not in progress
@@ -1598,3 +1614,613 @@ def test_dynamic_project_swap_schema(tmp_path):
     expected = runtime.state.fit_analyses[swap_job_id].projects.swap_suggestion
     assert swap["remove_project_id"] == expected.remove_project_id
     assert swap["add_project_id"] == expected.add_project_id
+
+
+def _contract_for_rank(runtime, rank: int):
+    assert runtime.state is not None
+    ids = runtime.state.top_3_job_ids
+    runtime.state.phase = AgentPhase.TAILORING
+    runtime.state.draft_resumes = {ids[index]: object() for index in range(rank - 1)}
+    contract = runtime._next_action_contract()
+    assert contract["target_rank"] == rank
+    return contract
+
+
+def test_evidence_reconciliation_is_disjoint_and_fixture_correct(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.state is not None
+    rank3_id = runtime.state.top_3_job_ids[2]
+    raw = copy.deepcopy(runtime.state.fit_analyses[rank3_id])
+    reconciled = runtime._reconcile_tailoring_evidence(rank3_id)
+    unchanged = runtime.state.fit_analyses[rank3_id]
+
+    assert unchanged.core_skills.genuine_gaps == raw.core_skills.genuine_gaps
+    assert unchanged.core_skills.aligned_skills == raw.core_skills.aligned_skills
+    assert "data pipelines" in raw.core_skills.genuine_gaps
+    assert "evaluation" in raw.core_skills.aligned_skills
+    assert "data pipelines" in reconciled.aligned_skills
+    assert "data pipelines" not in reconciled.genuine_gaps
+    assert "evaluation" not in reconciled.aligned_skills
+    assert "evaluation" in reconciled.genuine_gaps
+    assert "data pipelines" in reconciled.skills_moved_from_gap_to_supported
+    assert "evaluation" in reconciled.skills_moved_from_aligned_to_gap
+    assert reconciled.reconciliation_applied is True
+
+    aligned_keys = set()
+    for skill in reconciled.aligned_skills:
+        from src.tools.scoring import normalize_skill
+
+        key = normalize_skill(skill, has_vector_search=True)
+        if key:
+            aligned_keys.add(key)
+    evidenced_keys = set()
+    for skill in reconciled.evidenced_elsewhere_skills:
+        from src.tools.scoring import normalize_skill
+
+        key = normalize_skill(skill, has_vector_search=True)
+        if key:
+            evidenced_keys.add(key)
+    gap_keys = set()
+    for skill in reconciled.genuine_gaps:
+        from src.tools.scoring import normalize_skill
+
+        key = normalize_skill(skill, has_vector_search=True)
+        if key:
+            gap_keys.add(key)
+    assert not aligned_keys & evidenced_keys
+    assert not aligned_keys & gap_keys
+    assert not evidenced_keys & gap_keys
+
+    contract = _contract_for_rank(runtime, 3)
+    context = contract["target_context"]
+    assert context["genuine_gaps"] == reconciled.genuine_gaps
+    assert context["aligned_skills"] == reconciled.aligned_skills
+    assert "evaluation" in context["do_not_claim_skills"]
+
+
+def test_draft_audit_collects_multiple_field_issues(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract, call = _bad_semantic_tailor_draft(runtime)
+    transferred, transfer_call = _transferred_metric_tailor_draft(runtime)
+    del transferred
+    draft = copy.deepcopy(transfer_call.arguments)
+    draft["professional_summary"]["new_text"] = (
+        "Machine learning engineer with evaluation and Python systems."
+    )
+    hydrated = runtime._hydrate_tailor_resume_call(
+        _tool("tailor_resume", draft, 1),
+        contract,
+    )
+    audit = runtime._audit_hydrated_tailor_draft(hydrated, contract)
+    fields = set(audit.fields)
+    assert "professional_summary" in fields
+    assert "bullet_1" in fields
+    assert len(audit.issues) >= 2
+    categories = {issue.category for issue in audit.issues}
+    assert "semantic_text" in categories
+    assert "evidence" in categories
+
+
+def test_draft_audit_supported_data_pipelines_passes(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract = _contract_for_rank(runtime, 3)
+    assert runtime.registry is not None
+    assert runtime.state is not None
+    job_id = contract["target_job_id"]
+    job = runtime.registry._job(job_id)
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        runtime.registry.bundle,
+    )
+    draft = _compact_draft_from_plan(plan, job_id)
+    draft["professional_summary"]["new_text"] = (
+        "AI engineer with SQL data pipelines and Python ML systems."
+    )
+    hydrated = runtime._hydrate_tailor_resume_call(
+        _tool("tailor_resume", draft, 1),
+        contract,
+    )
+    audit = runtime._audit_hydrated_tailor_draft(hydrated, contract)
+    summary_issues = [
+        issue for issue in audit.issues if issue.field == "professional_summary"
+    ]
+    assert not any("data pipelines" in issue.message for issue in summary_issues)
+
+
+def test_draft_audit_unsupported_evaluation_fails(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract = _contract_for_rank(runtime, 3)
+    assert runtime.registry is not None
+    assert runtime.state is not None
+    job_id = contract["target_job_id"]
+    job = runtime.registry._job(job_id)
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        runtime.registry.bundle,
+    )
+    draft = _compact_draft_from_plan(plan, job_id)
+    draft["professional_summary"]["new_text"] = (
+        "AI engineer with evaluation frameworks and Python ML systems."
+    )
+    hydrated = runtime._hydrate_tailor_resume_call(
+        _tool("tailor_resume", draft, 1),
+        contract,
+    )
+    audit = runtime._audit_hydrated_tailor_draft(hydrated, contract)
+    assert any(
+        issue.field == "professional_summary" and issue.category == "evidence"
+        for issue in audit.issues
+    )
+
+
+def test_patch_schema_contains_only_failed_fields(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    runtime.state.model_call_count = 6
+    contract, call = _bad_semantic_tailor_draft(runtime)
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[call]),
+        contract,
+    )
+    patch_contract = runtime._next_action_contract()
+    schemas = runtime._model_schemas_for_contract(patch_contract)
+    properties = schemas[0]["function"]["parameters"]["properties"]
+    assert set(properties) == {"job_id", "professional_summary"}
+    assert "bullet_1" not in properties
+    assert "bullet_2" not in properties
+
+    runtime._clear_tailor_patch_recovery()
+    contract2, call2 = _valid_compact_tailor_call(runtime)
+    draft = copy.deepcopy(call2.arguments)
+    draft["bullet_1"]["new_text"] = draft["bullet_2"]["new_text"]
+    runtime.state.model_call_count = 7
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("tailor_resume", draft, 2)]),
+        contract2,
+    )
+    bullet_contract = runtime._next_action_contract()
+    bullet_props = runtime._model_schemas_for_contract(bullet_contract)[0][
+        "function"
+    ]["parameters"]["properties"]
+    assert set(bullet_props) == {"job_id", "bullet_1"}
+
+
+def test_patch_merge_preserves_valid_fields_byte_for_byte(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    runtime.state.model_call_count = 6
+    contract, call = _bad_semantic_tailor_draft(runtime)
+    base_snapshot = copy.deepcopy(call.arguments)
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[call]),
+        contract,
+    )
+    assert runtime._tailor_patch_recovery is not None
+    assert base_snapshot == runtime._tailor_patch_recovery["base_draft"]
+    patch = {
+        "job_id": contract["target_job_id"],
+        "professional_summary": {
+            "new_text": "AI engineer with Python ML and SQL systems.",
+            "reason": "Align summary with target role.",
+        },
+    }
+    patch_contract = runtime._next_action_contract()
+    merged_call = _tool("tailor_resume", patch, 2)
+    hydrated = runtime._hydrate_tailor_resume_call(merged_call, patch_contract)
+    assert hydrated.arguments["decision_summary"] == base_snapshot["decision_summary"]
+    assert hydrated.arguments["edit_plan"]["plan_rationale"] == base_snapshot[
+        "plan_rationale"
+    ]
+    assert (
+        hydrated.arguments["edit_plan"]["experience_bullet_edits"][0]["new_text"]
+        == base_snapshot["bullet_1"]["new_text"]
+    )
+    assert (
+        hydrated.arguments["edit_plan"]["experience_bullet_edits"][1]["new_text"]
+        == base_snapshot["bullet_2"]["new_text"]
+    )
+
+
+def test_patch_recovery_payload_smaller_than_initial(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    runtime.state.model_call_count = 6
+    contract, call = _bad_semantic_tailor_draft(runtime)
+    initial_checkpoint = json.loads(
+        _current_tailoring_messages(runtime, contract)[1]["content"]
+    )
+    initial_size = len(json.dumps(initial_checkpoint, separators=(",", ":")))
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[call]),
+        contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    patch_size = len(json.dumps(recovery, separators=(",", ":")))
+    assert patch_size < initial_size
+    assert len(runtime.conversation) == 3
+
+
+def test_rejection_category_mapping(tmp_path):
+    classify = JobSearchAgentRuntime._classify_tailor_rejection
+    assert classify("Candidate text claims unsupported required skill 'evaluation'") == "evidence"
+    assert classify("Edited candidate text claims genuine-gap skill 'data pipelines'") == "evidence"
+    assert classify("Tailor resume draft audit rejection: bullet_1: unsupported numeric claim '36%'") == "evidence"
+    assert (
+        classify(
+            'Tailor resume semantic rejection: the professional summary must '
+            'explicitly include the role phrase "AI engineer".'
+        )
+        == "semantic_text"
+    )
+    assert (
+        classify(
+            "Tailor resume hydration rejection: project_swap_reason is required"
+        )
+        == "hydration"
+    )
+    assert classify("Tool registry rejected the requested call: protected section edited") == "tool_execution"
+
+
+def test_rank3_simultaneous_invalid_fields_patch_preserves_swap_reason(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    runtime.state.model_call_count = 6
+    contract = _contract_for_rank(runtime, 3)
+    if not contract["project_swap_required"]:
+        pytest.skip("Rank 3 fixture has no project swap in this dataset")
+    assert runtime.registry is not None
+    assert runtime.state is not None
+    job_id = contract["target_job_id"]
+    job = runtime.registry._job(job_id)
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        runtime.registry.bundle,
+    )
+    draft = _compact_draft_from_plan(plan, job_id)
+    draft["professional_summary"]["new_text"] = "Machine learning engineer with Python."
+    draft["bullet_1"]["new_text"] = draft["bullet_2"]["new_text"]
+    swap_reason = draft["project_swap_reason"]
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("tailor_resume", draft, 1)]),
+        contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["tailor_recovery_mode"] == "patch"
+    assert "project_swap_reason" not in recovery["patch_fields"]
+    assert runtime._tailor_patch_recovery["base_draft"]["project_swap_reason"] == swap_reason
+
+
+def test_build_resume_execution_fit_analysis_rank3_fixture(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    job_id = runtime.state.top_3_job_ids[2]
+    raw = runtime.state.fit_analyses[job_id]
+    execution = runtime._build_resume_execution_fit_analysis(job_id)
+
+    assert execution is not raw
+    assert execution.model_dump() != raw.model_dump()
+    assert "data pipelines" in raw.core_skills.genuine_gaps
+    assert "evaluation" in raw.core_skills.aligned_skills
+    assert "data pipelines" in execution.core_skills.aligned_skills
+    assert "data pipelines" not in execution.core_skills.genuine_gaps
+    assert "evaluation" in execution.core_skills.genuine_gaps
+    assert execution.job_id == raw.job_id
+    assert execution.formatted_text == raw.formatted_text
+    assert execution.projects.swap_suggestion == raw.projects.swap_suggestion
+    assert execution.relevant_experience == raw.relevant_experience
+
+
+def test_raw_fit_analysis_preserved_after_successful_tailor_execution(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
+    )
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract, call = _valid_compact_tailor_call(runtime)
+    job_id = contract["target_job_id"]
+    raw_before = runtime.state.fit_analyses[job_id]
+    raw_snapshot = copy.deepcopy(raw_before.model_dump())
+    analyze_record = next(
+        item
+        for item in runtime.state.tool_execution_history
+        if item.tool_name == "analyze_fit" and item.job_id == job_id
+    )
+
+    runtime.state.model_call_count = 6
+    runtime.trace = NoOpAgentTracer().start_trace("agent_run", run_id=runtime.run_id)
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[call]),
+        contract,
+    )
+    assert valid == 1
+    assert invalid == 0
+    raw_after = runtime.state.fit_analyses[job_id]
+    assert raw_after is raw_before
+    assert raw_after.model_dump() == raw_snapshot
+    assert analyze_record.result_summary["core_skills"]["genuine_gaps"] == (
+        raw_before.core_skills.genuine_gaps
+    )
+    tool_span = next(
+        item
+        for item in runtime.trace.record.observations
+        if item.name == "tool_call:tailor_resume"
+    )
+    assert tool_span.metadata["reconciled_execution_evidence"] is True
+    assert tool_span.metadata["raw_fit_analysis_preserved"] is True
+
+
+def test_data_pipelines_not_rejected_as_genuine_gap_with_execution_copy(tmp_path):
+    from src.tools.resume_tailoring import (
+        ResumeEvidenceError,
+        _candidate_supported_skills,
+        _validate_no_genuine_gap_claims,
+        _validate_required_skill_claims,
+    )
+
+    runtime = _runtime_at_tailoring(tmp_path)
+    job_id = runtime.state.top_3_job_ids[2]
+    raw = runtime.state.fit_analyses[job_id]
+    execution = runtime._build_resume_execution_fit_analysis(job_id)
+    text = "AI engineer with SQL data pipelines and Python ML systems."
+
+    with pytest.raises(ResumeEvidenceError, match="genuine-gap skill 'data pipelines'"):
+        _validate_no_genuine_gap_claims(text, raw)
+    _validate_no_genuine_gap_claims(text, execution)
+
+    assert runtime.registry is not None
+    job = runtime.registry._job(job_id)
+    raw_supported = _candidate_supported_skills(
+        runtime.registry.bundle,
+        runtime.registry.memory,
+    )
+    with pytest.raises(
+        ResumeEvidenceError, match="unsupported required skill 'data pipelines'"
+    ):
+        _validate_required_skill_claims(text, job, raw_supported)
+
+    execution_bundle, _ = runtime._build_resume_execution_bundle(job_id)
+    execution_supported = _candidate_supported_skills(
+        execution_bundle,
+        runtime.registry.memory,
+    )
+    _validate_required_skill_claims(text, job, execution_supported)
+
+
+def test_build_resume_execution_bundle_rank3_promotes_data_pipelines(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    job_id = runtime.state.top_3_job_ids[2]
+    assert runtime.registry is not None
+    raw_bundle = runtime.registry.bundle
+    raw_record = raw_bundle.get_evidence("EV-EXP-BULLET-001")
+    assert raw_record is not None
+    assert "data pipelines" not in raw_record.supported_skills
+
+    execution_bundle, metadata = runtime._build_resume_execution_bundle(job_id)
+    assert execution_bundle is not raw_bundle
+    promoted = execution_bundle.get_evidence("EV-EXP-BULLET-001")
+    assert promoted is not None
+    assert "data pipelines" in promoted.supported_skills
+    assert metadata["promoted_execution_skills"] == ["data pipelines"]
+    assert metadata["promoted_evidence_record_count"] == 1
+
+    unchanged = execution_bundle.get_evidence("EV-EXP-BULLET-002")
+    raw_second = raw_bundle.get_evidence("EV-EXP-BULLET-002")
+    assert unchanged is not None and raw_second is not None
+    assert unchanged.supported_skills == raw_second.supported_skills
+    assert raw_record.supported_skills == raw_bundle.get_evidence(
+        "EV-EXP-BULLET-001"
+    ).supported_skills
+
+
+def test_raw_candidate_bundle_preserved_after_successful_tailor_execution(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
+    )
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract = _contract_for_rank(runtime, 3)
+    job_id = contract["target_job_id"]
+    assert runtime.registry is not None
+    raw_bundle = runtime.registry.bundle
+    raw_bundle_snapshot = copy.deepcopy(raw_bundle.model_dump())
+    raw_record_snapshot = copy.deepcopy(
+        raw_bundle.get_evidence("EV-EXP-BULLET-001").model_dump()
+    )
+
+    job = runtime.registry._job(job_id)
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        raw_bundle,
+    )
+    draft = _compact_draft_from_plan(plan, job_id)
+    draft["professional_summary"]["new_text"] = (
+        "AI engineer with SQL data pipelines and Python ML systems."
+    )
+    runtime.state.model_call_count = 6
+    runtime.trace = NoOpAgentTracer().start_trace("agent_run", run_id=runtime.run_id)
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("tailor_resume", draft, 1)]),
+        contract,
+    )
+    assert valid == 1
+    assert invalid == 0
+    assert runtime.registry.bundle is raw_bundle
+    assert runtime.registry.bundle.model_dump() == raw_bundle_snapshot
+    assert (
+        runtime.registry.bundle.get_evidence("EV-EXP-BULLET-001").model_dump()
+        == raw_record_snapshot
+    )
+    tool_span = next(
+        item
+        for item in runtime.trace.record.observations
+        if item.name == "tool_call:tailor_resume"
+    )
+    assert tool_span.metadata["reconciled_execution_bundle"] is True
+    assert tool_span.metadata["raw_candidate_bundle_preserved"] is True
+    assert tool_span.metadata["promoted_execution_skills"] == ["data pipelines"]
+    assert "profile" not in json.dumps(tool_span.metadata)
+
+
+def test_raw_candidate_bundle_restored_after_tailor_execution_failure(
+    tmp_path, monkeypatch
+):
+    def _fail_compile(*args, **kwargs):
+        raise RuntimeError("simulated PDF compile failure")
+
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", _fail_compile
+    )
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract = _contract_for_rank(runtime, 3)
+    job_id = contract["target_job_id"]
+    assert runtime.registry is not None
+    raw_bundle = runtime.registry.bundle
+    raw_bundle_snapshot = copy.deepcopy(raw_bundle.model_dump())
+    job = runtime.registry._job(job_id)
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        raw_bundle,
+    )
+    draft = _compact_draft_from_plan(plan, job_id)
+    draft["professional_summary"]["new_text"] = (
+        "AI engineer with SQL data pipelines and Python ML systems."
+    )
+    runtime.state.model_call_count = 6
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("tailor_resume", draft, 1)]),
+        contract,
+    )
+    assert valid == 0
+    assert invalid == 1
+    assert runtime.registry.bundle is raw_bundle
+    assert runtime.registry.bundle.model_dump() == raw_bundle_snapshot
+
+
+def test_cover_letter_phase_observes_raw_candidate_bundle(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
+    )
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.registry is not None
+    raw_bundle = runtime.registry.bundle
+    raw_bundle_snapshot = copy.deepcopy(raw_bundle.model_dump())
+
+    for rank in range(1, 4):
+        contract = _contract_for_rank(runtime, rank)
+        job_id = contract["target_job_id"]
+        job = runtime.registry._job(job_id)
+        plan = valid_resume_plan(
+            job,
+            runtime.state.fit_analyses[job_id],
+            raw_bundle,
+        )
+        draft = _compact_draft_from_plan(plan, job_id)
+        if rank == 3:
+            draft["professional_summary"]["new_text"] = (
+                "AI engineer with SQL data pipelines and Python ML systems."
+            )
+        runtime.state.model_call_count = 5 + rank
+        valid, invalid = runtime._execute_response_calls(
+            NormalizedAssistantMessage(tool_calls=[_tool("tailor_resume", draft, rank)]),
+            contract,
+        )
+        assert valid == 1
+        assert invalid == 0
+        assert runtime.registry.bundle is raw_bundle
+        assert runtime.registry.bundle.model_dump() == raw_bundle_snapshot
+
+    assert len(runtime.state.draft_resumes) == 3
+    assert runtime.registry.bundle is raw_bundle
+
+
+def test_rank3_data_pipelines_execution_no_genuine_gap_rejection(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
+    )
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract = _contract_for_rank(runtime, 3)
+    job_id = contract["target_job_id"]
+    assert runtime.registry is not None
+    job = runtime.registry._job(job_id)
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        runtime.registry.bundle,
+    )
+    draft = _compact_draft_from_plan(plan, job_id)
+    draft["professional_summary"]["new_text"] = (
+        "AI engineer with SQL data pipelines and Python ML systems."
+    )
+    runtime.state.model_call_count = 6
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("tailor_resume", draft, 1)]),
+        contract,
+    )
+    assert valid == 1
+    assert invalid == 0
+    assert job_id in runtime.state.draft_resumes
+    assert "data pipelines" in runtime.state.fit_analyses[job_id].core_skills.genuine_gaps
+
+
+def test_raw_fit_analysis_restored_after_tailor_execution_failure(
+    tmp_path, monkeypatch
+):
+    def _fail_compile(*args, **kwargs):
+        raise RuntimeError("simulated PDF compile failure")
+
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", _fail_compile
+    )
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract, call = _valid_compact_tailor_call(runtime)
+    job_id = contract["target_job_id"]
+    raw_before = runtime.state.fit_analyses[job_id]
+    raw_snapshot = copy.deepcopy(raw_before.model_dump())
+    runtime.state.model_call_count = 6
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[call]),
+        contract,
+    )
+    assert valid == 0
+    assert invalid == 1
+    raw_after = runtime.state.fit_analyses[job_id]
+    assert raw_after is raw_before
+    assert raw_after.model_dump() == raw_snapshot
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["error_category"] == "tool_execution"
+
+
+def test_rank3_evaluation_claim_rejected_by_resume_execution_path(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
+    )
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract = _contract_for_rank(runtime, 3)
+    job_id = contract["target_job_id"]
+    assert runtime.registry is not None
+    job = runtime.registry._job(job_id)
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        runtime.registry.bundle,
+    )
+    draft = _compact_draft_from_plan(plan, job_id)
+    draft["professional_summary"]["new_text"] = (
+        "AI engineer with evaluation frameworks and Python ML systems."
+    )
+    runtime.state.model_call_count = 6
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("tailor_resume", draft, 1)]),
+        contract,
+    )
+    assert valid == 0
+    assert invalid == 1
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["error_category"] == "evidence"
+    assert "evaluation" in recovery["error"].casefold()

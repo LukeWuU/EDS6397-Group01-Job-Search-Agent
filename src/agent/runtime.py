@@ -6,11 +6,12 @@ import copy
 import json
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, field_validator
 
 from src.agent.client import (
     ChatModelClient,
@@ -37,7 +38,14 @@ from src.agent.tool_registry import (
     ToolExecutionError,
     ToolRegistryError,
 )
-from src.config import AppConfig, load_config
+from src.tools.filtering import normalize_title
+from src.tools.fit_analysis import FitAnalysisResult
+from src.tools.resume_tailoring import (
+    _candidate_supported_skills,
+    _contains_canonical,
+)
+from src.tools.scoring import normalize_skill
+from src.models.bundle import CandidateBundle
 from src.models.candidate import CandidateProfile, ExperienceBullet
 from src.models.memory import CandidateMemory
 from src.observability.tracing import (
@@ -175,6 +183,55 @@ class _TailorResumeTextDraftWithSwap(_TailorResumeTextDraftBase):
 # Backward-compatible alias for tests importing the draft adapter model.
 _TailorResumeTextDraftArguments = _TailorResumeTextDraftNoSwap
 
+_TAILOR_PATCHABLE_FIELDS = (
+    "professional_summary",
+    "bullet_1",
+    "bullet_2",
+    "project_swap_reason",
+)
+
+
+class _ReconciledSkillBinding(BaseModel):
+    skill: str
+    source_hint: str
+
+
+class _ReconciledTailoringEvidence(BaseModel):
+    """Concise reconciled skill view for tailoring; raw Fit Analysis is unchanged."""
+
+    aligned_skills: list[str]
+    evidenced_elsewhere_skills: list[str]
+    genuine_gaps: list[str]
+    supported_skill_bindings: list[_ReconciledSkillBinding]
+    job_requirements_unsupported: list[str]
+    skills_moved_from_gap_to_supported: list[str]
+    skills_moved_from_aligned_to_gap: list[str]
+    category_conflicts_resolved: int
+    reconciliation_applied: bool = True
+
+
+class _DraftAuditIssue(BaseModel):
+    field: str
+    category: str
+    message: str
+    bullet_slot: str | None = None
+
+
+class _DraftAuditResult(BaseModel):
+    issues: list[_DraftAuditIssue]
+
+    @property
+    def fields(self) -> list[str]:
+        return sorted({issue.field for issue in self.issues})
+
+    def raise_if_issues(self) -> None:
+        if not self.issues:
+            return
+        parts = [f"{issue.field}: {issue.message}" for issue in self.issues]
+        raise ToolArgumentsError(
+            "Tailor resume draft audit rejection: " + "; ".join(parts)
+        )
+
 
 class AgentRuntimeError(Exception):
     """Base error for the one runtime."""
@@ -237,6 +294,8 @@ class JobSearchAgentRuntime:
         self._output_folders: dict[str, Path] = {}
         self._conversation_compacted = False
         self._last_generation_span: SpanContext | None = None
+        self._tailor_patch_recovery: dict[str, Any] | None = None
+        self._reconciled_evidence_cache: dict[str, _ReconciledTailoringEvidence] = {}
 
     @staticmethod
     def _phase_needs_compaction(phase: str) -> bool:
@@ -251,6 +310,9 @@ class JobSearchAgentRuntime:
             not in {
                 "exact_tailor_resume_structural_template",
                 "target_context",
+                "tailor_patch_fields",
+                "tailor_recovery_mode",
+                "reconciliation_metadata",
             }
         }
 
@@ -283,6 +345,20 @@ class JobSearchAgentRuntime:
             diagnostics["semantic_bullet_slot_mode"] = "named"
             diagnostics["required_role_phrase"] = contract.get("required_role_phrase")
             diagnostics["project_swap_required"] = contract.get("project_swap_required")
+            target_job_id = contract.get("target_job_id")
+            if target_job_id:
+                reconciled = self._reconcile_tailoring_evidence(target_job_id)
+                diagnostics["evidence_reconciliation_applied"] = True
+                diagnostics["reconciled_aligned_skill_count"] = len(
+                    reconciled.aligned_skills
+                )
+                diagnostics["reconciled_gap_count"] = len(reconciled.genuine_gaps)
+                diagnostics["reconciled_conflict_count"] = (
+                    reconciled.category_conflicts_resolved
+                )
+            if contract.get("tailor_recovery_mode") == "patch":
+                diagnostics["patch_recovery_applied"] = True
+                diagnostics["patch_fields"] = contract.get("tailor_patch_fields", [])
         return diagnostics
 
     def _build_workflow_checkpoint(self, contract: dict[str, Any]) -> dict[str, Any]:
@@ -384,13 +460,25 @@ class JobSearchAgentRuntime:
         self,
         error: str,
         contract: dict[str, Any],
+        *,
+        audit: _DraftAuditResult | None = None,
     ) -> None:
         assert self.state is not None
-        category = (
-            self._classify_tailor_rejection(error)
-            if contract.get("allowed_tool") == "tailor_resume"
-            else "validation"
-        )
+        if contract.get("allowed_tool") == "tailor_resume":
+            if audit and audit.issues:
+                categories = {issue.category for issue in audit.issues}
+                if "semantic_text" in categories:
+                    category = "semantic_text"
+                elif "evidence" in categories:
+                    category = "evidence"
+                elif "hydration" in categories:
+                    category = "hydration"
+                else:
+                    category = self._classify_tailor_rejection(error)
+            else:
+                category = self._classify_tailor_rejection(error)
+        else:
+            category = "validation"
         self._report_progress(
             f"Model call {self.state.model_call_count}: "
             "tool call rejected by validation"
@@ -399,9 +487,25 @@ class JobSearchAgentRuntime:
         if self._last_generation_span is not None:
             existing = self._last_generation_span.record.metadata or {}
             metadata = {**existing, "rejected_category": category}
-            slot = self._infer_rejected_bullet_slot(error)
+            slot = None
+            if audit and audit.issues:
+                for issue in audit.issues:
+                    if issue.bullet_slot:
+                        slot = issue.bullet_slot
+                        break
+            if slot is None:
+                slot = self._infer_rejected_bullet_slot(error)
             if slot is not None:
                 metadata["rejected_bullet_slot"] = slot
+            if audit and audit.issues:
+                metadata["draft_audit_issue_count"] = len(audit.issues)
+                metadata["draft_audit_fields"] = audit.fields
+            if self._tailor_patch_recovery:
+                metadata["patch_recovery_applied"] = True
+                metadata["patch_fields"] = self._tailor_patch_recovery["patch_fields"]
+                metadata["preserved_field_count"] = len(
+                    self._tailor_patch_recovery.get("preserved_fields", [])
+                )
             self._last_generation_span.record.metadata = metadata
 
     @staticmethod
@@ -415,6 +519,595 @@ class JobSearchAgentRuntime:
     @staticmethod
     def _summary_includes_role_phrase(summary_text: str, required_phrase: str) -> bool:
         return required_phrase.casefold() in summary_text.casefold()
+
+    def _candidate_bullet_corpus(self) -> str:
+        assert self.registry is not None
+        parts: list[str] = []
+        for experience in self.registry.bundle.profile.experience:
+            for bullet in experience.bullets:
+                parts.append(bullet.text)
+        return " ".join(parts)
+
+    def _skill_supported_by_candidate(self, skill: str, *, bullet_corpus: str) -> bool:
+        assert self.registry is not None
+        canonical = normalize_skill(skill, has_vector_search=True)
+        if not canonical:
+            return False
+        supported = _candidate_supported_skills(
+            self.registry.bundle,
+            self.registry.memory,
+        )
+        if canonical in supported:
+            return True
+        if _contains_canonical(bullet_corpus, canonical):
+            return True
+        for fact in self.registry.memory.facts:
+            fact_text = " ".join(
+                str(value)
+                for value in (
+                    fact.statement,
+                    fact.normalized_value,
+                    " ".join(fact.skill_tags),
+                )
+                if value
+            )
+            if _contains_canonical(fact_text, canonical):
+                return True
+        return False
+
+    def _reconcile_tailoring_evidence(
+        self,
+        job_id: str,
+    ) -> _ReconciledTailoringEvidence:
+        if job_id in self._reconciled_evidence_cache:
+            return self._reconciled_evidence_cache[job_id]
+        assert self.state is not None
+        assert self.registry is not None
+        analysis = self.state.fit_analyses[job_id]
+        job = self.registry._job(job_id)
+        bullet_corpus = self._candidate_bullet_corpus()
+        moved_gap_to_supported: list[str] = []
+        moved_aligned_to_gap: list[str] = []
+        conflicts = 0
+        seen: set[str] = set()
+        aligned: list[str] = []
+        evidenced: list[str] = []
+        gaps: list[str] = []
+
+        def canonical_key(skill: str) -> str:
+            return normalize_skill(skill, has_vector_search=True) or skill.casefold()
+
+        def add_unique(bucket: list[str], skill: str) -> None:
+            nonlocal conflicts
+            key = canonical_key(skill)
+            if key in seen:
+                conflicts += 1
+                return
+            seen.add(key)
+            bucket.append(skill)
+
+        def has_support(skill: str) -> bool:
+            return self._skill_supported_by_candidate(
+                skill,
+                bullet_corpus=bullet_corpus,
+            )
+
+        for skill in analysis.core_skills.aligned_skills:
+            if has_support(skill):
+                add_unique(aligned, skill)
+            else:
+                moved_aligned_to_gap.append(skill)
+                add_unique(gaps, skill)
+
+        for skill in analysis.core_skills.evidenced_elsewhere_skills:
+            if has_support(skill):
+                add_unique(evidenced, skill)
+            elif canonical_key(skill) not in seen:
+                add_unique(gaps, skill)
+
+        for skill in analysis.core_skills.genuine_gaps:
+            if has_support(skill):
+                moved_gap_to_supported.append(skill)
+                key = canonical_key(skill)
+                if key not in seen:
+                    add_unique(aligned, skill)
+            elif canonical_key(skill) not in seen:
+                add_unique(gaps, skill)
+
+        job_requirements_unsupported: list[str] = []
+        for skill in job.required_skills:
+            if not has_support(skill) and canonical_key(skill) not in seen:
+                add_unique(gaps, skill)
+                job_requirements_unsupported.append(skill)
+
+        bindings: list[_ReconciledSkillBinding] = []
+        for skill in [*aligned, *evidenced]:
+            canonical = normalize_skill(skill, has_vector_search=True)
+            hint = "candidate evidence"
+            if canonical and _contains_canonical(bullet_corpus, canonical):
+                hint = "primary experience bullets"
+            bindings.append(_ReconciledSkillBinding(skill=skill, source_hint=hint))
+
+        reconciled = _ReconciledTailoringEvidence(
+            aligned_skills=aligned,
+            evidenced_elsewhere_skills=evidenced,
+            genuine_gaps=gaps,
+            supported_skill_bindings=bindings,
+            job_requirements_unsupported=job_requirements_unsupported,
+            skills_moved_from_gap_to_supported=moved_gap_to_supported,
+            skills_moved_from_aligned_to_gap=moved_aligned_to_gap,
+            category_conflicts_resolved=conflicts,
+        )
+        self._reconciled_evidence_cache[job_id] = reconciled
+        return reconciled
+
+    def _build_resume_execution_fit_analysis(self, job_id: str) -> FitAnalysisResult:
+        """Build a private reconciled Fit Analysis copy for resume-tool execution."""
+        assert self.state is not None
+        raw_analysis = self.state.fit_analyses[job_id]
+        reconciled = self._reconcile_tailoring_evidence(job_id)
+        execution_copy = raw_analysis.model_copy(deep=True)
+        execution_copy.core_skills = execution_copy.core_skills.model_copy(
+            update={
+                "aligned_skills": list(reconciled.aligned_skills),
+                "evidenced_elsewhere_skills": list(
+                    reconciled.evidenced_elsewhere_skills
+                ),
+                "genuine_gaps": list(reconciled.genuine_gaps),
+            }
+        )
+        return execution_copy
+
+    def _is_target_job_skill(self, skill: str, job_id: str) -> bool:
+        assert self.registry is not None
+        canonical = normalize_skill(skill, has_vector_search=True)
+        if not canonical:
+            return False
+        job = self.registry._job(job_id)
+        return any(
+            normalize_skill(required, has_vector_search=True) == canonical
+            for required in job.required_skills
+        )
+
+    def _build_resume_execution_bundle(
+        self,
+        job_id: str,
+    ) -> tuple[CandidateBundle, dict[str, Any]]:
+        """Build a private bundle copy with narrowly promoted bullet evidence skills."""
+        assert self.registry is not None
+        raw_bundle = self.registry.bundle
+        reconciled = self._reconcile_tailoring_evidence(job_id)
+        execution_copy = raw_bundle.model_copy(deep=True)
+        promotions: dict[str, set[str]] = {}
+
+        for skill in reconciled.skills_moved_from_gap_to_supported:
+            if not self._is_target_job_skill(skill, job_id):
+                continue
+            canonical = normalize_skill(skill, has_vector_search=True)
+            if not canonical:
+                continue
+            for experience in raw_bundle.profile.experience:
+                for bullet in experience.bullets:
+                    if not _contains_canonical(bullet.text, canonical):
+                        continue
+                    for evidence_id in bullet.evidence_ids:
+                        if raw_bundle.get_evidence(evidence_id) is None:
+                            continue
+                        promotions.setdefault(evidence_id, set()).add(skill)
+
+        if not promotions:
+            return execution_copy, {
+                "promoted_execution_skill_count": 0,
+                "promoted_execution_skills": [],
+                "promoted_evidence_record_count": 0,
+            }
+
+        updated_records = []
+        promoted_skills: set[str] = set()
+        promoted_evidence_ids: set[str] = set()
+        for record in execution_copy.evidence.evidence_records:
+            skills_to_add = promotions.get(record.evidence_id)
+            if not skills_to_add:
+                updated_records.append(record)
+                continue
+            existing = {
+                normalize_skill(item, has_vector_search=True) or item.casefold()
+                for item in record.supported_skills
+            }
+            new_skills = list(record.supported_skills)
+            for skill in sorted(skills_to_add):
+                canonical = normalize_skill(skill, has_vector_search=True) or skill.casefold()
+                if canonical in existing:
+                    continue
+                new_skills.append(skill)
+                existing.add(canonical)
+                promoted_skills.add(skill)
+            updated_records.append(
+                record.model_copy(update={"supported_skills": new_skills})
+            )
+            promoted_evidence_ids.add(record.evidence_id)
+
+        execution_copy.evidence = execution_copy.evidence.model_copy(
+            update={"evidence_records": updated_records}
+        )
+        return execution_copy, {
+            "promoted_execution_skill_count": len(promoted_skills),
+            "promoted_execution_skills": sorted(promoted_skills),
+            "promoted_evidence_record_count": len(promoted_evidence_ids),
+        }
+
+    @contextmanager
+    def _resume_execution_context(
+        self,
+        job_id: str,
+    ) -> Iterator[tuple[FitAnalysisResult, CandidateBundle, dict[str, Any]]]:
+        """Temporarily substitute reconciled Fit Analysis and bundle for resume execution."""
+        assert self.state is not None
+        assert self.registry is not None
+        raw_analysis = self.state.fit_analyses[job_id]
+        raw_bundle = self.registry.bundle
+        execution_analysis = self._build_resume_execution_fit_analysis(job_id)
+        execution_bundle, bundle_metadata = self._build_resume_execution_bundle(
+            job_id
+        )
+        self.state.fit_analyses[job_id] = execution_analysis
+        self.registry.bundle = execution_bundle
+        try:
+            yield execution_analysis, execution_bundle, bundle_metadata
+        finally:
+            self.state.fit_analyses[job_id] = raw_analysis
+            self.registry.bundle = raw_bundle
+
+    def _supported_skills_map(self) -> dict[str, set[str]]:
+        assert self.registry is not None
+        return _candidate_supported_skills(
+            self.registry.bundle,
+            self.registry.memory,
+        )
+
+    def _text_claims_unsupported_required_skill(
+        self,
+        text: str,
+        job_id: str,
+        *,
+        bullet_corpus: str,
+    ) -> str | None:
+        assert self.registry is not None
+        job = self.registry._job(job_id)
+        for skill in job.required_skills:
+            canonical = normalize_skill(skill, has_vector_search=True)
+            if not canonical or not _contains_canonical(text, canonical):
+                continue
+            if not self._skill_supported_by_candidate(
+                skill,
+                bullet_corpus=bullet_corpus,
+            ):
+                return skill
+        return None
+
+    def _text_claims_genuine_gap(
+        self,
+        text: str,
+        reconciled: _ReconciledTailoringEvidence,
+    ) -> str | None:
+        for gap in reconciled.genuine_gaps:
+            canonical = normalize_skill(gap, has_vector_search=True)
+            if canonical and _contains_canonical(text, canonical):
+                return gap
+        return None
+
+    def _unsupported_numbers(self, text: str, allowed_text: str) -> list[str]:
+        allowed = set(_TAILOR_NUMBER_PATTERN.findall(allowed_text))
+        return sorted(
+            set(_TAILOR_NUMBER_PATTERN.findall(text)) - allowed
+        )
+
+    def _bullet_slot_transfer_issues(
+        self,
+        slot: str,
+        text: str,
+        own_source: dict[str, Any],
+        other_source: dict[str, Any],
+    ) -> list[_DraftAuditIssue]:
+        issues: list[_DraftAuditIssue] = []
+        own_allowed = (
+            own_source.get("current_text", "")
+            + " "
+            + " ".join(own_source.get("allowed_numeric_claims", []))
+        )
+        other_allowed = (
+            other_source.get("current_text", "")
+            + " "
+            + " ".join(other_source.get("allowed_numeric_claims", []))
+        )
+        for number in self._unsupported_numbers(text, own_allowed):
+            if number in _TAILOR_NUMBER_PATTERN.findall(other_allowed):
+                issues.append(
+                    _DraftAuditIssue(
+                        field=slot,
+                        category="evidence",
+                        message=(
+                            f"{slot} uses numeric claim {number!r} allowed only "
+                            f"for the other bullet slot"
+                        ),
+                        bullet_slot=slot,
+                    )
+                )
+            else:
+                issues.append(
+                    _DraftAuditIssue(
+                        field=slot,
+                        category="evidence",
+                        message=f"{slot} contains unsupported numeric claim {number!r}",
+                        bullet_slot=slot,
+                    )
+                )
+        return issues
+
+    def _audit_hydrated_tailor_draft(
+        self,
+        hydrated_call: NormalizedToolCall,
+        contract: dict[str, Any],
+    ) -> _DraftAuditResult:
+        assert self.registry is not None
+        target_job_id = contract.get("target_job_id")
+        if target_job_id is None:
+            return _DraftAuditResult(issues=[])
+        reconciled = self._reconcile_tailoring_evidence(target_job_id)
+        edit_plan = hydrated_call.arguments.get("edit_plan", {})
+        if not isinstance(edit_plan, dict):
+            return _DraftAuditResult(issues=[])
+        issues: list[_DraftAuditIssue] = []
+        bullet_corpus = self._candidate_bullet_corpus()
+        target_context = contract.get("target_context") or {}
+        slot_sources = {
+            "bullet_1": target_context.get("bullet_1_source") or {},
+            "bullet_2": target_context.get("bullet_2_source") or {},
+        }
+
+        summary = edit_plan.get("professional_summary")
+        if isinstance(summary, dict):
+            summary_text = str(summary.get("new_text", ""))
+            required_phrase = contract.get("required_role_phrase") or (
+                self._derive_required_role_phrase(
+                    self.registry._job(target_job_id).title
+                )
+            )
+            if not self._summary_includes_role_phrase(summary_text, required_phrase):
+                issues.append(
+                    _DraftAuditIssue(
+                        field="professional_summary",
+                        category="semantic_text",
+                        message=(
+                            "professional summary must explicitly include role "
+                            f'phrase "{required_phrase}"'
+                        ),
+                    )
+                )
+            unsupported = self._text_claims_unsupported_required_skill(
+                summary_text,
+                target_job_id,
+                bullet_corpus=bullet_corpus,
+            )
+            if unsupported is not None:
+                issues.append(
+                    _DraftAuditIssue(
+                        field="professional_summary",
+                        category="evidence",
+                        message=(
+                            f"professional summary claims unsupported required "
+                            f"skill {unsupported!r}"
+                        ),
+                    )
+                )
+            gap = self._text_claims_genuine_gap(summary_text, reconciled)
+            if gap is not None:
+                issues.append(
+                    _DraftAuditIssue(
+                        field="professional_summary",
+                        category="evidence",
+                        message=(
+                            f"professional summary claims genuine-gap skill {gap!r}"
+                        ),
+                    )
+                )
+
+        bullet_edits = edit_plan.get("experience_bullet_edits")
+        if isinstance(bullet_edits, list):
+            for index, edit in enumerate(bullet_edits[:2], start=1):
+                if not isinstance(edit, dict):
+                    continue
+                slot = f"bullet_{index}"
+                text = str(edit.get("new_text", ""))
+                other_slot = "bullet_2" if slot == "bullet_1" else "bullet_1"
+                issues.extend(
+                    self._bullet_slot_transfer_issues(
+                        slot,
+                        text,
+                        slot_sources.get(slot, {}),
+                        slot_sources.get(other_slot, {}),
+                    )
+                )
+                gap = self._text_claims_genuine_gap(text, reconciled)
+                if gap is not None:
+                    issues.append(
+                        _DraftAuditIssue(
+                            field=slot,
+                            category="evidence",
+                            message=f"{slot} claims genuine-gap skill {gap!r}",
+                            bullet_slot=slot,
+                        )
+                    )
+                unsupported = self._text_claims_unsupported_required_skill(
+                    text,
+                    target_job_id,
+                    bullet_corpus=bullet_corpus,
+                )
+                if unsupported is not None:
+                    issues.append(
+                        _DraftAuditIssue(
+                            field=slot,
+                            category="evidence",
+                            message=(
+                                f"{slot} claims unsupported required skill "
+                                f"{unsupported!r}"
+                            ),
+                            bullet_slot=slot,
+                        )
+                    )
+
+        if contract.get("project_swap_required"):
+            swap_reason = hydrated_call.arguments.get("project_swap_reason")
+            if swap_reason is None:
+                plan_swap = edit_plan.get("project_swap")
+                if isinstance(plan_swap, dict):
+                    swap_reason = plan_swap.get("reason")
+            if not isinstance(swap_reason, str) or not swap_reason.strip():
+                issues.append(
+                    _DraftAuditIssue(
+                        field="project_swap_reason",
+                        category="hydration",
+                        message=(
+                            "project_swap_reason must be a nonempty string when "
+                            "a project swap is required"
+                        ),
+                    )
+                )
+        return _DraftAuditResult(issues=issues)
+
+    def _is_complete_tailor_draft(self, arguments: dict[str, Any]) -> bool:
+        required = {
+            "decision_summary",
+            "job_id",
+            "professional_summary",
+            "bullet_1",
+            "bullet_2",
+            "plan_rationale",
+            "project_swap_reason",
+        }
+        return required.issubset(arguments)
+
+    def _merge_tailor_patch(
+        self,
+        base_draft: dict[str, Any],
+        patch: dict[str, Any],
+        patch_fields: list[str],
+    ) -> dict[str, Any]:
+        merged = copy.deepcopy(base_draft)
+        for field in patch_fields:
+            if field in patch:
+                merged[field] = copy.deepcopy(patch[field])
+        return merged
+
+    def _patch_model_for_contract(
+        self,
+        contract: dict[str, Any],
+    ) -> type[BaseModel]:
+        patch_fields = list(contract.get("tailor_patch_fields") or [])
+        field_defs: dict[str, Any] = {
+            "job_id": (str, Field(min_length=1)),
+        }
+        if "professional_summary" in patch_fields:
+            field_defs["professional_summary"] = (_TailorSemanticTextEdit, ...)
+        if "bullet_1" in patch_fields:
+            field_defs["bullet_1"] = (_TailorSemanticTextEdit, ...)
+        if "bullet_2" in patch_fields:
+            field_defs["bullet_2"] = (_TailorSemanticTextEdit, ...)
+        if "project_swap_reason" in patch_fields:
+            if contract.get("project_swap_required"):
+                field_defs["project_swap_reason"] = (str, Field(min_length=1, max_length=200))
+            else:
+                field_defs["project_swap_reason"] = (Literal[None], None)
+        return create_model(
+            "_TailorResumePatchDraft",
+            __config__=ConfigDict(extra="forbid"),
+            **field_defs,
+        )
+
+    @staticmethod
+    def _tailor_patch_required_shape(
+        target_job_id: str,
+        patch_fields: list[str],
+        *,
+        has_project_swap: bool,
+    ) -> dict[str, Any]:
+        shape: dict[str, Any] = {"job_id": target_job_id}
+        if "professional_summary" in patch_fields:
+            shape["professional_summary"] = {
+                "new_text": "<revised summary>",
+                "reason": "<reason>",
+            }
+        for slot in ("bullet_1", "bullet_2"):
+            if slot in patch_fields:
+                shape[slot] = {"new_text": f"<revised {slot} text>", "reason": "<reason>"}
+        if "project_swap_reason" in patch_fields:
+            shape["project_swap_reason"] = "<swap reason>" if has_project_swap else None
+        return shape
+
+    def _prepare_tailor_patch_recovery(
+        self,
+        raw_call: NormalizedToolCall,
+        contract: dict[str, Any],
+        *,
+        audit: _DraftAuditResult | None = None,
+        error: str | None = None,
+    ) -> None:
+        if not self._is_complete_tailor_draft(raw_call.arguments):
+            self._tailor_patch_recovery = None
+            return
+        patch_fields = audit.fields if audit and audit.issues else []
+        if not patch_fields and error:
+            patch_fields = self._patch_fields_from_error(error, contract)
+        patch_fields = [
+            field
+            for field in patch_fields
+            if field in _TAILOR_PATCHABLE_FIELDS
+        ]
+        if not patch_fields:
+            self._tailor_patch_recovery = None
+            return
+        base_draft = copy.deepcopy(raw_call.arguments)
+        preserved = [
+            field
+            for field in (
+                "decision_summary",
+                "professional_summary",
+                "bullet_1",
+                "bullet_2",
+                "project_swap_reason",
+                "plan_rationale",
+            )
+            if field in base_draft and field not in patch_fields
+        ]
+        self._tailor_patch_recovery = {
+            "base_draft": base_draft,
+            "patch_fields": patch_fields,
+            "preserved_fields": preserved,
+        }
+
+    def _patch_fields_from_error(
+        self,
+        error: str,
+        contract: dict[str, Any],
+    ) -> list[str]:
+        lowered = error.casefold()
+        fields: list[str] = []
+        if "professional summary" in lowered or "role phrase" in lowered:
+            fields.append("professional_summary")
+        slot = self._infer_rejected_bullet_slot(error)
+        if slot in {"bullet_1", "bullet_2"}:
+            fields.append(slot)
+        if "project_swap_reason" in lowered:
+            fields.append("project_swap_reason")
+        if (
+            "unsupported required skill" in lowered
+            or "genuine-gap" in lowered
+        ) and "professional summary" not in lowered and slot is None:
+            fields.append("professional_summary")
+        return sorted(set(fields))
+
+    def _clear_tailor_patch_recovery(self) -> None:
+        self._tailor_patch_recovery = None
 
     @staticmethod
     def _tailor_draft_model_for_contract(
@@ -446,7 +1139,7 @@ class JobSearchAgentRuntime:
             return "target_job"
         if "hydration rejection" in lowered:
             return "hydration"
-        if "must explicitly include the role phrase" in lowered:
+        if "must explicitly include" in lowered and "role phrase" in lowered:
             return "semantic_text"
         if "must clearly align with the actual job role" in lowered:
             return "semantic_text"
@@ -454,11 +1147,22 @@ class JobSearchAgentRuntime:
             "genuine-gap" in lowered
             or "unsupported numeric" in lowered
             or "introduces capability not supported" in lowered
+            or "unsupported required skill" in lowered
+            or "draft audit rejection" in lowered
         ):
             return "evidence"
         if any(marker in lowered for marker in _CITATION_ERROR_MARKERS):
             return "citation"
         if "rejected the requested call" in lowered:
+            if (
+                "unsupported required skill" in lowered
+                or "genuine-gap" in lowered
+                or "unsupported numeric" in lowered
+                or "introduces capability not supported" in lowered
+            ):
+                return "evidence"
+            if "protected" in lowered or "one-page" in lowered or "one page" in lowered:
+                return "tool_execution"
             return "tool_execution"
         if "protected" in lowered or "one-page" in lowered or "one page" in lowered:
             return "tool_execution"
@@ -481,47 +1185,33 @@ class JobSearchAgentRuntime:
         hydrated_call: NormalizedToolCall,
         contract: dict[str, Any],
     ) -> None:
-        edit_plan = hydrated_call.arguments.get("edit_plan")
-        if not isinstance(edit_plan, dict):
-            return
-        summary = edit_plan.get("professional_summary")
-        if not isinstance(summary, dict):
-            return
-        summary_text = summary.get("new_text", "")
-        required_phrase = contract.get("required_role_phrase")
-        if not isinstance(required_phrase, str) or not required_phrase:
-            assert self.registry is not None
-            target_job_id = contract.get("target_job_id")
-            if target_job_id is None:
-                return
-            required_phrase = self._derive_required_role_phrase(
-                self.registry._job(target_job_id).title
-            )
-        if not self._summary_includes_role_phrase(summary_text, required_phrase):
-            raise ToolArgumentsError(
-                "Tailor resume semantic rejection: the professional summary must "
-                f'explicitly include the role phrase "{required_phrase}".'
-            )
+        self._audit_hydrated_tailor_draft(hydrated_call, contract).raise_if_issues()
 
-    def _tailoring_bullet_slot_source(self, bullet: ExperienceBullet) -> dict[str, Any]:
-        assert self.registry is not None
-        evidence_descriptions: list[str] = []
-        allowed_numeric: set[str] = set(_TAILOR_NUMBER_PATTERN.findall(bullet.text))
-        for evidence_id in bullet.evidence_ids:
-            record = self.registry.bundle.get_evidence(evidence_id)
-            if record is None:
-                continue
-            evidence_descriptions.append(record.claim)
-            allowed_numeric.update(_TAILOR_NUMBER_PATTERN.findall(record.claim))
+    def _compact_bullet_slot_source(
+        self,
+        bullet: ExperienceBullet,
+        reconciled: _ReconciledTailoringEvidence,
+    ) -> dict[str, Any]:
+        allowed_numeric = sorted(
+            set(_TAILOR_NUMBER_PATTERN.findall(bullet.text))
+        )
+        supported_concepts: list[str] = []
+        for skill in [*reconciled.aligned_skills, *reconciled.evidenced_elsewhere_skills]:
+            canonical = normalize_skill(skill, has_vector_search=True)
+            if canonical and _contains_canonical(bullet.text, canonical):
+                supported_concepts.append(skill)
         return {
             "current_text": bullet.text,
-            "evidence_description": (
-                "; ".join(evidence_descriptions)
-                if evidence_descriptions
-                else "Primary experience bullet evidence."
-            ),
-            "allowed_numeric_claims": sorted(allowed_numeric),
+            "supported_concepts": supported_concepts,
+            "allowed_numeric_claims": allowed_numeric,
         }
+
+    def _tailoring_bullet_slot_source(
+        self,
+        bullet: ExperienceBullet,
+        reconciled: _ReconciledTailoringEvidence,
+    ) -> dict[str, Any]:
+        return self._compact_bullet_slot_source(bullet, reconciled)
 
     @staticmethod
     def _is_citation_error(error: str) -> bool:
@@ -654,7 +1344,10 @@ class JobSearchAgentRuntime:
         allowed_tool = contract["allowed_tool"]
         if allowed_tool != "tailor_resume":
             return self.registry.model_schemas([allowed_tool])
-        draft_model = self._tailor_draft_model_for_contract(contract)
+        if contract.get("tailor_patch_fields"):
+            draft_model = self._patch_model_for_contract(contract)
+        else:
+            draft_model = self._tailor_draft_model_for_contract(contract)
         return [
             {
                 "type": "function",
@@ -720,8 +1413,27 @@ class JobSearchAgentRuntime:
             raise StateInvariantError(
                 "Tailor resume hydration rejection: missing deterministic target job"
             )
+        arguments = call.arguments
+        if contract.get("tailor_patch_fields") and self._tailor_patch_recovery:
+            patch_model = self._patch_model_for_contract(contract)
+            try:
+                patch = patch_model.model_validate(arguments)
+            except ValidationError as exc:
+                raise ToolArgumentsError(
+                    f"Tailor resume draft schema rejection: {exc}"
+                ) from exc
+            if patch.job_id != target_job_id:
+                raise StateInvariantError(
+                    "Tailor resume draft job_id mismatch: expected "
+                    f"{target_job_id!r}; received {patch.job_id!r}"
+                )
+            arguments = self._merge_tailor_patch(
+                self._tailor_patch_recovery["base_draft"],
+                patch.model_dump(mode="json"),
+                list(contract["tailor_patch_fields"]),
+            )
         try:
-            draft = self._parse_tailor_draft_arguments(call.arguments, contract)
+            draft = self._parse_tailor_draft_arguments(arguments, contract)
         except ToolArgumentsError:
             raise
         if draft.job_id != target_job_id:
@@ -929,67 +1641,36 @@ class JobSearchAgentRuntime:
     ) -> dict[str, Any]:
         assert self.state is not None
         assert self.registry is not None
-        analysis = self.state.fit_analyses[job_id]
         job = self.registry._job(job_id)
+        reconciled = self._reconcile_tailoring_evidence(job_id)
         editable_bullets = self._editable_tailoring_bullets()[:2]
         bullet_sources = [
-            self._tailoring_bullet_slot_source(bullet) for bullet in editable_bullets
+            self._tailoring_bullet_slot_source(bullet, reconciled)
+            for bullet in editable_bullets
         ]
-        relevant_skills = [
-            *analysis.core_skills.aligned_skills,
-            *analysis.core_skills.evidenced_elsewhere_skills,
+        swap = self.state.fit_analyses[job_id].projects.swap_suggestion
+        memory_facts = [
+            {
+                "fact_type": fact.fact_type,
+                "normalized_value": fact.normalized_value,
+            }
+            for fact in self.registry.memory.facts
         ]
-        relevant_master_skills: list[dict[str, Any]] = []
-        seen_skills: set[str] = set()
-        for skill in relevant_skills:
-            key = skill.casefold()
-            if key in seen_skills:
-                continue
-            seen_skills.add(key)
-            records = self.registry.bundle.get_skill_evidence(skill)
-            relevant_master_skills.append(
-                {
-                    "skill": skill,
-                    "evidence_ids": sorted(
-                        {
-                            record.evidence_id
-                            for record in records
-                            if record.evidence_id
-                        }
-                    ),
-                }
-            )
         return {
             "target_job_id": job_id,
             "rank": self._target_rank(job_id),
             "title": job.title,
             "company": job.company,
             "required_role_phrase": self._derive_required_role_phrase(job.title),
-            "project_swap_required": analysis.projects.swap_suggestion is not None,
-            "aligned_skills": analysis.core_skills.aligned_skills,
-            "evidenced_elsewhere_skills": (
-                analysis.core_skills.evidenced_elsewhere_skills
-            ),
-            "genuine_gaps": analysis.core_skills.genuine_gaps,
-            "project_swap": (
-                analysis.projects.swap_suggestion.model_dump(mode="json")
-                if analysis.projects.swap_suggestion
-                else None
-            ),
-            "bullet_1_source": bullet_sources[0] if len(bullet_sources) > 0 else None,
+            "project_swap_required": swap is not None,
+            "project_swap_hint": swap.reason if swap is not None else None,
+            "aligned_skills": reconciled.aligned_skills,
+            "evidenced_elsewhere_skills": reconciled.evidenced_elsewhere_skills,
+            "genuine_gaps": reconciled.genuine_gaps,
+            "do_not_claim_skills": reconciled.genuine_gaps,
+            "bullet_1_source": bullet_sources[0] if bullet_sources else None,
             "bullet_2_source": bullet_sources[1] if len(bullet_sources) > 1 else None,
-            "current_professional_summary": self._current_professional_summary(job_id),
-            "relevant_master_skills": relevant_master_skills,
-            "current_memory_facts": [
-                {
-                    "fact_id": fact.fact_id,
-                    "fact_type": fact.fact_type,
-                    "statement": fact.statement,
-                    "normalized_value": fact.normalized_value,
-                    "skill_tags": fact.skill_tags,
-                }
-                for fact in self.registry.memory.facts
-            ],
+            "current_memory_facts": memory_facts,
             "revision_feedback": revision_feedback,
         }
 
@@ -1117,10 +1798,18 @@ class JobSearchAgentRuntime:
                 target_job_id,
                 revision_feedback=revision_feedback,
             )
-            required_shape = self._tailor_draft_required_shape(
-                target_job_id,
-                has_project_swap=expected_swap is not None,
-            )
+            if self._tailor_patch_recovery:
+                patch_fields = self._tailor_patch_recovery["patch_fields"]
+                required_shape = self._tailor_patch_required_shape(
+                    target_job_id,
+                    patch_fields,
+                    has_project_swap=expected_swap is not None,
+                )
+            else:
+                required_shape = self._tailor_draft_required_shape(
+                    target_job_id,
+                    has_project_swap=expected_swap is not None,
+                )
             required_role_phrase = self._derive_required_role_phrase(job.title)
             project_swap_required = expected_swap is not None
             constraints = [
@@ -1168,6 +1857,13 @@ class JobSearchAgentRuntime:
             contract["project_swap_required"] = (
                 state.fit_analyses[target_job_id].projects.swap_suggestion is not None
             )
+            if self._tailor_patch_recovery:
+                contract["tailor_patch_fields"] = list(
+                    self._tailor_patch_recovery["patch_fields"]
+                )
+                contract["tailor_recovery_mode"] = "patch"
+            else:
+                contract["tailor_recovery_mode"] = "full"
         return contract
 
     def run(self) -> AgentRunResult:
@@ -1452,6 +2148,7 @@ class JobSearchAgentRuntime:
 
         raw_call = response.tool_calls[0]
         execution_call = raw_call
+        audit: _DraftAuditResult | None = None
         try:
             if raw_call.name != contract["allowed_tool"]:
                 raise StateInvariantError(
@@ -1465,7 +2162,15 @@ class JobSearchAgentRuntime:
                     execution_call,
                     contract,
                 )
-                self._validate_hydrated_tailor_semantics(execution_call, contract)
+                audit = self._audit_hydrated_tailor_draft(execution_call, contract)
+                if self._last_generation_span is not None:
+                    existing = self._last_generation_span.record.metadata or {}
+                    self._last_generation_span.record.metadata = {
+                        **existing,
+                        "draft_audit_issue_count": len(audit.issues),
+                        "draft_audit_fields": audit.fields,
+                    }
+                audit.raise_if_issues()
             self._validate_call_for_contract(execution_call, contract)
             baseline_arguments = self.registry.parse_arguments(
                 execution_call.name,
@@ -1477,15 +2182,54 @@ class JobSearchAgentRuntime:
             )
             self._append_assistant_message(response)
             self._execute_model_tool_call(execution_call)
+            if contract["allowed_tool"] == "tailor_resume":
+                self._clear_tailor_patch_recovery()
         except (StateInvariantError, ToolRegistryError) as exc:
             error = str(exc)
             if contract["allowed_tool"] == "tailor_resume":
-                self._report_validation_rejection_progress(error, contract)
+                self._report_validation_rejection_progress(
+                    error, contract, audit=audit
+                )
+                if audit is None and raw_call.name == contract["allowed_tool"]:
+                    try:
+                        hydrated = self._hydrate_tailor_resume_call(
+                            raw_call,
+                            contract,
+                        )
+                        audit = self._audit_hydrated_tailor_draft(
+                            hydrated,
+                            contract,
+                        )
+                    except (StateInvariantError, ToolRegistryError):
+                        audit = None
+                self._prepare_tailor_patch_recovery(
+                    raw_call,
+                    contract,
+                    audit=audit,
+                    error=error,
+                )
+                if self._tailor_patch_recovery:
+                    contract = {
+                        **contract,
+                        "tailor_patch_fields": self._tailor_patch_recovery[
+                            "patch_fields"
+                        ],
+                        "tailor_recovery_mode": "patch",
+                        "required_argument_shape": self._tailor_patch_required_shape(
+                            contract["target_job_id"],
+                            self._tailor_patch_recovery["patch_fields"],
+                            has_project_swap=contract.get(
+                                "project_swap_required",
+                                False,
+                            ),
+                        ),
+                    }
             self._record_invalid(tool_call=raw_call, error=error)
             self._rebuild_bounded_recovery(
                 contract,
                 error=error,
                 tool_call=raw_call,
+                audit=audit,
             )
             return 0, 1
         finally:
@@ -1679,14 +2423,51 @@ class JobSearchAgentRuntime:
             },
             observation_type="tool",
         ) as span:
-            outcome = self.registry.execute(
-                call.name,
-                call.arguments,
-                tool_call_id=call.id,
-                revision_round=revision_round,
-                review_feedback=review_feedback,
-                trace_parent=span,
-            )
+            if call.name == "tailor_resume":
+                job_id = call.arguments.get("job_id")
+                if not isinstance(job_id, str) or not job_id:
+                    raise StateInvariantError(
+                        "tailor_resume execution requires a deterministic job_id"
+                    )
+                reconciled = self._reconcile_tailoring_evidence(job_id)
+                with self._resume_execution_context(job_id) as (
+                    _execution_analysis,
+                    _execution_bundle,
+                    bundle_metadata,
+                ):
+                    existing = span.record.metadata or {}
+                    span.record.metadata = {
+                        **existing,
+                        "reconciled_execution_evidence": True,
+                        "raw_fit_analysis_preserved": True,
+                        "reconciled_execution_bundle": True,
+                        "raw_candidate_bundle_preserved": True,
+                        "execution_aligned_skill_count": len(
+                            reconciled.aligned_skills
+                        ),
+                        "execution_gap_count": len(reconciled.genuine_gaps),
+                        "execution_conflict_count": (
+                            reconciled.category_conflicts_resolved
+                        ),
+                        **bundle_metadata,
+                    }
+                    outcome = self.registry.execute(
+                        call.name,
+                        call.arguments,
+                        tool_call_id=call.id,
+                        revision_round=revision_round,
+                        review_feedback=review_feedback,
+                        trace_parent=span,
+                    )
+            else:
+                outcome = self.registry.execute(
+                    call.name,
+                    call.arguments,
+                    tool_call_id=call.id,
+                    revision_round=revision_round,
+                    review_feedback=review_feedback,
+                    trace_parent=span,
+                )
             span.set_output(outcome.message_payload)
         model_payload = self._compact_model_tool_result(outcome)
         self.conversation.append(
@@ -1769,10 +2550,20 @@ class JobSearchAgentRuntime:
         tool_call: NormalizedToolCall | None,
         error: str,
         contract: dict[str, Any],
+        *,
+        audit: _DraftAuditResult | None = None,
     ) -> dict[str, Any]:
         if contract["allowed_tool"] == "tailor_resume":
             diagnostics = self._draft_argument_diagnostics(tool_call)
             error_category = self._classify_tailor_rejection(error)
+            if audit and audit.issues:
+                categories = {issue.category for issue in audit.issues}
+                if "semantic_text" in categories:
+                    error_category = "semantic_text"
+                elif "evidence" in categories:
+                    error_category = "evidence"
+                elif "hydration" in categories:
+                    error_category = "hydration"
             draft_issues = (
                 diagnostics["missing_fields"]
                 or diagnostics["extra_fields"]
@@ -1782,6 +2573,74 @@ class JobSearchAgentRuntime:
             )
             if draft_issues and error_category == "validation":
                 error_category = "draft_schema"
+            if error_category == "draft_schema":
+                self._clear_tailor_patch_recovery()
+            patch_fields = contract.get("tailor_patch_fields") or []
+            patch_mode = bool(patch_fields) and error_category != "draft_schema"
+            if patch_mode:
+                instruction = (
+                    "Return exactly one tailor_resume patch call containing only "
+                    "the listed invalid fields plus job_id. Python preserves all "
+                    "other valid fields and deterministic IDs."
+                )
+                if "professional_summary" in patch_fields and contract.get(
+                    "required_role_phrase"
+                ):
+                    phrase = contract["required_role_phrase"]
+                    instruction += (
+                        f' The professional summary must explicitly include the '
+                        f'role phrase "{phrase}".'
+                    )
+                payload: dict[str, Any] = {
+                    "type": "invalid_tool_call_recovery",
+                    "error_category": error_category,
+                    "allowed_tool": "tailor_resume",
+                    "target_job_id": contract.get("target_job_id"),
+                    "error": error[:500],
+                    "instruction": instruction,
+                    "tailor_recovery_mode": "patch",
+                    "patch_fields": patch_fields,
+                    "required_argument_shape": contract["required_argument_shape"],
+                }
+                if self._tailor_patch_recovery:
+                    payload["preserved_field_count"] = len(
+                        self._tailor_patch_recovery.get("preserved_fields", [])
+                    )
+                if audit and audit.issues:
+                    payload["draft_audit_fields"] = audit.fields
+                    payload["issues"] = [
+                        issue.model_dump(mode="json") for issue in audit.issues
+                    ]
+                target_context = contract.get("target_context") or {}
+                for field in patch_fields:
+                    if field in {"bullet_1", "bullet_2"}:
+                        source = target_context.get(f"{field}_source")
+                        if source is not None:
+                            payload[f"{field}_source"] = source
+                    if field == "professional_summary" and contract.get(
+                        "required_role_phrase"
+                    ):
+                        payload["required_role_phrase"] = contract[
+                            "required_role_phrase"
+                        ]
+                    if field == "project_swap_reason":
+                        payload["project_swap_required"] = contract.get(
+                            "project_swap_required",
+                            False,
+                        )
+                bullet_slots = [
+                    field
+                    for field in patch_fields
+                    if field in {"bullet_1", "bullet_2"}
+                ]
+                if len(bullet_slots) == 1:
+                    payload["rejected_bullet_slot"] = bullet_slots[0]
+                elif audit and audit.issues:
+                    for issue in audit.issues:
+                        if issue.bullet_slot:
+                            payload["rejected_bullet_slot"] = issue.bullet_slot
+                            break
+                return payload
             if error_category == "semantic_text":
                 required_phrase = contract.get("required_role_phrase")
                 if "must explicitly include the role phrase" in error and required_phrase:
@@ -1913,6 +2772,7 @@ class JobSearchAgentRuntime:
         error: str,
         tool_call: NormalizedToolCall | None = None,
         length_limited: bool = False,
+        audit: _DraftAuditResult | None = None,
     ) -> None:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -1955,6 +2815,7 @@ class JobSearchAgentRuntime:
                             tool_call,
                             error,
                             contract,
+                            audit=audit,
                         ),
                         ensure_ascii=False,
                         separators=(",", ":"),
@@ -2168,6 +3029,8 @@ class JobSearchAgentRuntime:
                 invalid_turns += 1
             else:
                 raw_call = response.tool_calls[0]
+                execution_call = raw_call
+                audit: _DraftAuditResult | None = None
                 try:
                     if raw_call.name != contract["allowed_tool"]:
                         raise StateInvariantError(
@@ -2183,7 +3046,15 @@ class JobSearchAgentRuntime:
                         execution_call,
                         contract,
                     )
-                    self._validate_hydrated_tailor_semantics(execution_call, contract)
+                    audit = self._audit_hydrated_tailor_draft(execution_call, contract)
+                    if self._last_generation_span is not None:
+                        existing = self._last_generation_span.record.metadata or {}
+                        self._last_generation_span.record.metadata = {
+                            **existing,
+                            "draft_audit_issue_count": len(audit.issues),
+                            "draft_audit_fields": audit.fields,
+                        }
+                    audit.raise_if_issues()
                     self._validate_call_for_contract(execution_call, contract)
                     self.registry.parse_arguments(
                         execution_call.name,
@@ -2198,16 +3069,54 @@ class JobSearchAgentRuntime:
                     )
                 except (StateInvariantError, ToolRegistryError) as exc:
                     error = str(exc)
-                    self._report_validation_rejection_progress(error, contract)
+                    if audit is None and raw_call.name == contract["allowed_tool"]:
+                        try:
+                            hydrated = self._hydrate_tailor_resume_call(
+                                raw_call,
+                                contract,
+                            )
+                            audit = self._audit_hydrated_tailor_draft(
+                                hydrated,
+                                contract,
+                            )
+                        except (StateInvariantError, ToolRegistryError):
+                            audit = None
+                    self._report_validation_rejection_progress(
+                        error, contract, audit=audit
+                    )
+                    self._prepare_tailor_patch_recovery(
+                        raw_call,
+                        contract,
+                        audit=audit,
+                        error=error,
+                    )
+                    if self._tailor_patch_recovery:
+                        contract = {
+                            **contract,
+                            "tailor_patch_fields": self._tailor_patch_recovery[
+                                "patch_fields"
+                            ],
+                            "tailor_recovery_mode": "patch",
+                            "required_argument_shape": self._tailor_patch_required_shape(
+                                contract["target_job_id"],
+                                self._tailor_patch_recovery["patch_fields"],
+                                has_project_swap=contract.get(
+                                    "project_swap_required",
+                                    False,
+                                ),
+                            ),
+                        }
                     self._record_invalid(tool_call=raw_call, error=error)
                     self._rebuild_bounded_recovery(
                         contract,
                         error=error,
                         tool_call=raw_call,
+                        audit=audit,
                     )
                     invalid_turns += 1
                 else:
                     self.state.consecutive_invalid_call_count = 0
+                    self._clear_tailor_patch_recovery()
                     return outcome.result
                 finally:
                     self._last_generation_span = None

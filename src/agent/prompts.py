@@ -102,6 +102,7 @@ TAILOR_RESUME_NORMAL_CONSTRAINTS = [
         "Preserve supported facts and metrics; no unsupported or "
         "genuine-gap claims."
     ),
+    "Do not claim skills listed in target_context.do_not_claim_skills.",
     (
         "professional_summary.new_text: at most 55 words; each bullet new_text: "
         "at most 32 words; each reason: at most 18 words; plan_rationale: "
