@@ -42,12 +42,15 @@ from src.agent.tool_registry import (
 )
 from src.tools.cover_letter import (
     CoverLetterCitation,
+    CoverLetterEvidenceError,
     CoverLetterParagraph,
     CoverLetterPlan,
     CoverLetterSkillItem,
     _MEANINGLESS_HOOK_WORDS,
+    _citation_supports_skill,
     _normalize_phrase,
     _skill_is_job_relevant,
+    validate_cover_letter_plan,
 )
 from src.tools.filtering import normalize_title
 from src.tools.fit_analysis import FitAnalysisResult
@@ -426,6 +429,54 @@ class _AllowedCoverSkill(BaseModel):
     citation: dict[str, Any]
 
 
+class _AllowedCandidateClaim(BaseModel):
+    claim_text: str
+    citations: list[dict[str, Any]]
+    numeric_tokens: list[str] = Field(default_factory=list)
+
+
+_COVER_MAX_ALLOWED_CLAIMS = 6
+_COVER_CITATION_SOURCE_ORDER = {
+    "job_posting": 0,
+    "experience": 1,
+    "experience_bullet": 2,
+    "portfolio_project": 3,
+    "education": 4,
+    "master_skill": 5,
+    "evidence_registry": 6,
+    "memory_fact": 7,
+    "candidate_profile": 8,
+    "finalized_resume": 9,
+    "company_details": 10,
+    "fit_analysis": 11,
+}
+_COVER_NUMERIC_DRIFT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (
+        re.compile(
+            r"14%\s+(?:improvement\s+in\s+)?(?:query\s+response\s+)?accuracy",
+            re.IGNORECASE,
+        ),
+        "14% metric must preserve validated recall at constant false-positive rate",
+    ),
+    (
+        re.compile(r"14%\s+improvement\s+in\s+model\s+performance", re.IGNORECASE),
+        "14% metric must preserve validated recall at constant false-positive rate",
+    ),
+    (
+        re.compile(r"36%\s+(?:improvement\s+in\s+)?model\s+performance", re.IGNORECASE),
+        "36% metric must preserve median analyst lookup-time reduction",
+    ),
+    (
+        re.compile(r"87%\s+(?:top[- ]three\s+)?precision", re.IGNORECASE),
+        "87% metric must preserve top-three retrieval over synthetic questions",
+    ),
+    (
+        re.compile(r"12%\s+(?:prediction\s+)?accuracy\s+improvement", re.IGNORECASE),
+        "12% metric must preserve MAE improvement over seasonal-naive baseline",
+    ),
+]
+
+
 _TAILOR_PATCHABLE_FIELDS = (
     "professional_summary",
     "bullet_1",
@@ -545,6 +596,12 @@ class JobSearchAgentRuntime:
             str, dict[str, _AllowedCoverSkill]
         ] = {}
         self._cover_letter_hook_cache: dict[str, tuple[list[str], bool]] = {}
+        self._cover_letter_claim_catalog_cache: dict[str, list[_AllowedCandidateClaim]] = (
+            {}
+        )
+        self._cover_letter_skill_support_cache: dict[str, dict[str, list[dict[str, Any]]]] = (
+            {}
+        )
         self._cover_letter_schema_model_cache: dict[tuple[Any, ...], type[BaseModel]] = (
             {}
         )
@@ -640,9 +697,16 @@ class JobSearchAgentRuntime:
                 diagnostics["cover_letter_hook_extraction_fallback_used"] = (
                     contract.get("cover_letter_hook_extraction_fallback_used", False)
                 )
+                diagnostics["cover_letter_allowed_claim_count"] = len(
+                    self._build_allowed_candidate_claims(target_job_id)
+                )
             if contract.get("cover_recovery_mode") == "patch":
                 diagnostics["cover_letter_patch_recovery_applied"] = True
                 diagnostics["cover_letter_patch_fields"] = contract.get(
+                    "cover_patch_fields",
+                    [],
+                )
+                diagnostics["cover_letter_recovery_affected_fields"] = contract.get(
                     "cover_patch_fields",
                     [],
                 )
@@ -651,6 +715,9 @@ class JobSearchAgentRuntime:
                         self._cover_letter_patch_recovery.get("preserved_fields", [])
                     )
                     diagnostics["cover_letter_rejected_category"] = (
+                        self._cover_letter_patch_recovery.get("rejected_category")
+                    )
+                    diagnostics["cover_letter_recovery_source_category"] = (
                         self._cover_letter_patch_recovery.get("rejected_category")
                     )
             else:
@@ -1475,6 +1542,530 @@ class JobSearchAgentRuntime:
             "evidence_id": source_id,
         }
 
+    def _validated_memory_fact_evidence_id(self, fact: Any) -> str | None:
+        assert self.registry is not None
+        for ref in fact.evidence_refs or []:
+            if not isinstance(ref, str) or not ref.strip():
+                continue
+            record = self.registry.bundle.get_evidence(ref)
+            if record is None:
+                continue
+            if "cover_letter" not in record.allowed_uses:
+                continue
+            return ref
+        return None
+
+    def _memory_fact_citation(self, fact: Any, paragraph_text: str) -> dict[str, Any]:
+        if fact.fact_type == "skill":
+            source_field = "skill_tags"
+        elif isinstance(fact.normalized_value, str) and fact.normalized_value.strip():
+            normalized_value = fact.normalized_value.strip()
+            if normalized_value.casefold() in paragraph_text.casefold():
+                source_field = "normalized_value"
+            else:
+                source_field = "statement"
+        else:
+            source_field = "statement"
+        return {
+            "source_type": "memory_fact",
+            "source_id": fact.fact_id,
+            "source_field": source_field,
+            "evidence_id": self._validated_memory_fact_evidence_id(fact),
+        }
+
+    @staticmethod
+    def _citation_identity(citation: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            citation.get("source_type"),
+            citation.get("source_id"),
+            citation.get("source_field"),
+            citation.get("evidence_id"),
+        )
+
+    @classmethod
+    def _sort_cover_citations(
+        cls,
+        citations: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return sorted(citations, key=cls._citation_sort_key)
+
+    @staticmethod
+    def _citation_sort_key(citation: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            _COVER_CITATION_SOURCE_ORDER.get(str(citation.get("source_type", "")), 99),
+            str(citation.get("source_id", "")),
+            str(citation.get("source_field", "")),
+            str(citation.get("evidence_id") or ""),
+        )
+
+    @staticmethod
+    def _dedupe_cover_citations(
+        citations: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        seen: set[tuple[Any, ...]] = set()
+        deduped: list[dict[str, Any]] = []
+        for citation in citations:
+            identity = JobSearchAgentRuntime._citation_identity(citation)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            deduped.append(citation)
+        return deduped
+
+    def _resolve_validated_skill_citation(self, skill: str) -> dict[str, Any] | None:
+        assert self.registry is not None
+        canonical = normalize_skill(skill, has_vector_search=True) or skill.casefold()
+        candidates: list[dict[str, Any]] = []
+        for fact in self.registry.memory.facts:
+            if fact.fact_type != "skill":
+                continue
+            candidates.append(self._memory_fact_citation(fact, skill))
+        for experience in self.registry.bundle.profile.experience:
+            for bullet in experience.bullets:
+                for evidence_id in bullet.evidence_ids:
+                    record = self.registry.bundle.get_evidence(evidence_id)
+                    if record is None or "cover_letter" not in record.allowed_uses:
+                        continue
+                    candidates.append(
+                        {
+                            "source_type": "experience_bullet",
+                            "source_id": bullet.bullet_id,
+                            "source_field": "text",
+                            "evidence_id": evidence_id,
+                        }
+                    )
+        for project in self.registry.bundle.all_projects():
+            for evidence_id in project.evidence_ids:
+                record = self.registry.bundle.get_evidence(evidence_id)
+                if record is None or "cover_letter" not in record.allowed_uses:
+                    continue
+                for field in ("short_description", "measurable_result"):
+                    candidates.append(
+                        {
+                            "source_type": "portfolio_project",
+                            "source_id": project.project_id,
+                            "source_field": field,
+                            "evidence_id": evidence_id,
+                        }
+                    )
+        candidates.append(self._cover_letter_skill_citation(skill))
+        for candidate in candidates:
+            citation = CoverLetterCitation.model_validate(candidate)
+            if _citation_supports_skill(
+                citation,
+                canonical,
+                bundle=self.registry.bundle,
+                memory=self.registry.memory,
+            ):
+                return candidate
+        return None
+
+    def _build_skill_support_catalog(
+        self,
+        job_id: str,
+    ) -> dict[str, list[dict[str, Any]]]:
+        assert self.registry is not None
+        if job_id in getattr(self, "_cover_letter_skill_support_cache", {}):
+            return self._cover_letter_skill_support_cache[job_id]
+        catalog: dict[str, list[dict[str, Any]]] = {}
+        registry = self._build_cover_letter_allowed_skill_registry(job_id)
+        for entry in registry.values():
+            canonical = entry.canonical
+            validated = self._resolve_validated_skill_citation(entry.display_name)
+            if validated is None:
+                continue
+            catalog.setdefault(canonical, []).append(copy.deepcopy(validated))
+        if not hasattr(self, "_cover_letter_skill_support_cache"):
+            self._cover_letter_skill_support_cache = {}
+        self._cover_letter_skill_support_cache[job_id] = catalog
+        return catalog
+
+    def _build_allowed_candidate_claims(
+        self,
+        job_id: str,
+    ) -> list[_AllowedCandidateClaim]:
+        if job_id in self._cover_letter_claim_catalog_cache:
+            return self._cover_letter_claim_catalog_cache[job_id]
+        assert self.registry is not None
+        job = self.registry._job(job_id)
+        reconciled = self._reconcile_tailoring_evidence(job_id)
+        preferred_skills = {
+            normalize_skill(skill, has_vector_search=True) or skill.casefold()
+            for skill in [
+                *job.required_skills,
+                *reconciled.aligned_skills,
+                *reconciled.evidenced_elsewhere_skills,
+            ]
+        }
+        entries: list[tuple[int, str, list[dict[str, Any]]]] = []
+
+        def relevance_score(claim_text: str) -> int:
+            score = 0
+            for canonical in preferred_skills:
+                if canonical and _contains_canonical(claim_text, canonical):
+                    score += 1
+            return score
+
+        def add_entry(claim_text: str, citations: list[dict[str, Any]]) -> None:
+            cleaned = " ".join(claim_text.split())
+            if not cleaned:
+                return
+            validated: list[dict[str, Any]] = []
+            for citation in citations:
+                try:
+                    CoverLetterCitation.model_validate(citation)
+                    validated.append(copy.deepcopy(citation))
+                except Exception:
+                    continue
+            if not validated:
+                return
+            entries.append((-relevance_score(cleaned), cleaned, validated))
+
+        memory_entries: list[tuple[int, str, list[dict[str, Any]]]] = []
+        for fact in sorted(
+            self.registry.memory.facts,
+            key=lambda item: item.fact_id,
+        ):
+            if fact.fact_type == "skill":
+                continue
+            claim_text = None
+            if isinstance(fact.normalized_value, str) and fact.normalized_value.strip():
+                claim_text = fact.normalized_value.strip()
+            elif fact.statement and fact.statement.strip():
+                claim_text = fact.statement.strip()
+            if claim_text is None:
+                continue
+            memory_entries.append(
+                (0, claim_text, [self._memory_fact_citation(fact, claim_text)])
+            )
+
+        for experience in self.registry.bundle.profile.experience:
+            for bullet in experience.bullets:
+                citations = [
+                    {
+                        "source_type": "experience_bullet",
+                        "source_id": bullet.bullet_id,
+                        "source_field": "text",
+                        "evidence_id": evidence_id,
+                    }
+                    for evidence_id in bullet.evidence_ids
+                    if self.registry.bundle.get_evidence(evidence_id) is not None
+                    and "cover_letter"
+                    in self.registry.bundle.get_evidence(evidence_id).allowed_uses
+                ]
+                if citations:
+                    add_entry(bullet.text, citations[:1])
+
+        for project in sorted(
+            self.registry.bundle.all_projects(),
+            key=lambda item: item.project_id,
+        ):
+            field = "measurable_result"
+            value = getattr(project, field, None)
+            if not isinstance(value, str) or not value.strip():
+                field = "short_description"
+                value = getattr(project, field, None)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            evidence_id = project.evidence_ids[0] if project.evidence_ids else None
+            if evidence_id is None:
+                continue
+            record = self.registry.bundle.get_evidence(evidence_id)
+            if record is None or "cover_letter" not in record.allowed_uses:
+                continue
+            add_entry(
+                value,
+                [
+                    {
+                        "source_type": "portfolio_project",
+                        "source_id": project.project_id,
+                        "source_field": field,
+                        "evidence_id": evidence_id,
+                    }
+                ],
+            )
+
+        seen_claims: set[str] = set()
+        claims: list[_AllowedCandidateClaim] = []
+        ordered_entries = memory_entries + sorted(
+            entries,
+            key=lambda item: (item[0], item[1]),
+        )
+        for _, claim_text, citations in ordered_entries:
+            if claim_text in seen_claims:
+                continue
+            seen_claims.add(claim_text)
+            numeric_tokens = sorted(set(_COVER_NUMBER_PATTERN.findall(claim_text)))
+            claims.append(
+                _AllowedCandidateClaim(
+                    claim_text=claim_text,
+                    citations=citations,
+                    numeric_tokens=numeric_tokens,
+                )
+            )
+            if len(claims) >= _COVER_MAX_ALLOWED_CLAIMS:
+                break
+        self._cover_letter_claim_catalog_cache[job_id] = claims
+        return claims
+
+    def _allowed_candidate_claim_texts(self, job_id: str) -> list[str]:
+        return [entry.claim_text for entry in self._build_allowed_candidate_claims(job_id)]
+
+    def _detect_allowed_claims_in_text(
+        self,
+        text: str,
+        job_id: str,
+    ) -> list[_AllowedCandidateClaim]:
+        matches: list[_AllowedCandidateClaim] = []
+        for entry in sorted(
+            self._build_allowed_candidate_claims(job_id),
+            key=lambda item: len(item.claim_text),
+            reverse=True,
+        ):
+            if entry.claim_text in text:
+                matches.append(entry)
+        return matches
+
+    def _mentioned_required_skills(self, text: str, job: Any) -> list[str]:
+        normalized_text = normalize_skill(text, has_vector_search=True)
+        mentioned: list[str] = []
+        for required in job.required_skills:
+            canonical = normalize_skill(required, has_vector_search=True)
+            if not canonical:
+                continue
+            if re.search(rf"(?<!\w){re.escape(canonical)}(?!\w)", normalized_text):
+                mentioned.append(required)
+        return mentioned
+
+    def _skill_item_citation_lookup(
+        self,
+        skill_items: list[dict[str, Any]],
+    ) -> dict[str, list[dict[str, Any]]]:
+        lookup: dict[str, list[dict[str, Any]]] = {}
+        for item in skill_items:
+            skill = str(item.get("skill", ""))
+            canonical = normalize_skill(skill, has_vector_search=True) or skill.casefold()
+            citations = item.get("citations") or []
+            if isinstance(citations, list) and citations:
+                lookup[canonical] = [copy.deepcopy(citations[0])]
+        return lookup
+
+    def _paragraph_skill_support_citation(
+        self,
+        skill: str,
+        job_id: str,
+        skill_item_lookup: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, Any] | None:
+        canonical = normalize_skill(skill, has_vector_search=True) or skill.casefold()
+        if canonical in skill_item_lookup:
+            return copy.deepcopy(skill_item_lookup[canonical][0])
+        catalog = self._build_skill_support_catalog(job_id)
+        citations = catalog.get(canonical) or []
+        return copy.deepcopy(citations[0]) if citations else None
+
+    def _close_paragraph_citations(
+        self,
+        job_id: str,
+        paragraph_text: str,
+        skill_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        assert self.registry is not None
+        job = self.registry._job(job_id)
+        citations: list[dict[str, Any]] = [
+            {
+                "source_type": "job_posting",
+                "source_id": job_id,
+                "source_field": "job_description",
+                "evidence_id": None,
+            }
+        ]
+        for entry in self._detect_allowed_claims_in_text(paragraph_text, job_id):
+            citations.extend(copy.deepcopy(entry.citations))
+        for fact in self.registry.memory.facts:
+            if self._paragraph_uses_memory_fact(paragraph_text, fact):
+                citations.append(self._memory_fact_citation(fact, paragraph_text))
+        skill_item_lookup = self._skill_item_citation_lookup(skill_items)
+        for required in self._mentioned_required_skills(paragraph_text, job):
+            support = self._paragraph_skill_support_citation(
+                required,
+                job_id,
+                skill_item_lookup,
+            )
+            if support is not None:
+                citations.append(support)
+        if not any(
+            citation.get("source_type") in {"experience", "experience_bullet"}
+            for citation in citations
+        ):
+            for entry in self._detect_allowed_claims_in_text(paragraph_text, job_id):
+                for citation in entry.citations:
+                    if citation.get("source_type") == "experience_bullet":
+                        citations.append(copy.deepcopy(citation))
+                        break
+                else:
+                    continue
+                break
+        if not any(
+            citation.get("source_type")
+            in {
+                "portfolio_project",
+                "education",
+                "master_skill",
+                "evidence_registry",
+                "memory_fact",
+            }
+            for citation in citations
+        ):
+            for entry in self._build_allowed_candidate_claims(job_id):
+                for citation in entry.citations:
+                    if citation.get("source_type") in {
+                        "portfolio_project",
+                        "education",
+                        "master_skill",
+                        "evidence_registry",
+                        "memory_fact",
+                    }:
+                        citations.append(copy.deepcopy(citation))
+                        break
+                else:
+                    continue
+                break
+        return self._sort_cover_citations(self._dedupe_cover_citations(citations))
+
+    def _cover_body_source_types(
+        self,
+        body_paragraphs: list[dict[str, Any]],
+    ) -> set[str]:
+        types: set[str] = set()
+        for paragraph in body_paragraphs:
+            for citation in paragraph.get("citations") or []:
+                if isinstance(citation, dict):
+                    source_type = citation.get("source_type")
+                    if isinstance(source_type, str):
+                        types.add(source_type)
+        return types
+
+    def _ensure_cover_body_source_requirements(
+        self,
+        job_id: str,
+        body_paragraphs: list[dict[str, Any]],
+    ) -> None:
+        if not body_paragraphs:
+            return
+        types = self._cover_body_source_types(body_paragraphs)
+        needs_experience = not types.intersection({"experience", "experience_bullet"})
+        needs_additional = not types.intersection(
+            {
+                "portfolio_project",
+                "education",
+                "master_skill",
+                "evidence_registry",
+                "memory_fact",
+            }
+        )
+        if not needs_experience and not needs_additional:
+            return
+        first = body_paragraphs[0]
+        citations = list(first.get("citations") or [])
+        if needs_experience:
+            for entry in self._build_allowed_candidate_claims(job_id):
+                for citation in entry.citations:
+                    if citation.get("source_type") == "experience_bullet":
+                        citations.append(copy.deepcopy(citation))
+                        break
+                else:
+                    continue
+                break
+        if needs_additional:
+            for entry in self._build_allowed_candidate_claims(job_id):
+                for citation in entry.citations:
+                    if citation.get("source_type") in {
+                        "portfolio_project",
+                        "education",
+                        "master_skill",
+                        "evidence_registry",
+                        "memory_fact",
+                    }:
+                        citations.append(copy.deepcopy(citation))
+                        break
+                else:
+                    continue
+                break
+        first["citations"] = self._sort_cover_citations(
+            self._dedupe_cover_citations(citations)
+        )
+
+    def _audit_numeric_claim_integrity(
+        self,
+        text: str,
+        job_id: str,
+    ) -> str | None:
+        numbers = sorted(set(_COVER_NUMBER_PATTERN.findall(text)))
+        if not numbers:
+            return None
+        for pattern, message in _COVER_NUMERIC_DRIFT_PATTERNS:
+            if pattern.search(text):
+                return message
+        catalog = self._build_allowed_candidate_claims(job_id)
+        for number in numbers:
+            matching = [
+                entry
+                for entry in catalog
+                if number in entry.numeric_tokens or number in entry.claim_text
+            ]
+            if not matching:
+                return f"unsupported numeric claim {number!r}"
+            if not any(entry.claim_text in text for entry in matching):
+                return (
+                    f"numeric claim {number!r} must copy an allowed_candidate_claim exactly"
+                )
+        return None
+
+    def _paragraph_has_allowed_candidate_claim(self, text: str, job_id: str) -> bool:
+        return bool(self._detect_allowed_claims_in_text(text, job_id))
+
+    def _prevalidate_hydrated_cover_letter_plan(
+        self,
+        plan_dict: dict[str, Any],
+        job_id: str,
+    ) -> None:
+        assert self.registry is not None
+        assert self.state is not None
+        job = self.registry._job(job_id)
+        job_score = next(
+            score for score in self.state.scoring_result.top_3 if score.job_id == job_id
+        )
+        fit_analysis = self._build_resume_execution_fit_analysis(job_id)
+        finalized = self.state.finalized_resumes[job_id]
+        plan = CoverLetterPlan.model_validate(plan_dict)
+        try:
+            validate_cover_letter_plan(
+                plan,
+                job=job,
+                job_score=job_score,
+                fit_analysis=fit_analysis,
+                bundle=self.registry.bundle,
+                memory=self.registry.memory,
+                finalized_resume=finalized,
+            )
+        except (
+            CoverLetterEvidenceError,
+            ToolRegistryError,
+            ValidationError,
+        ) as exc:
+            raise StateInvariantError(
+                f"Cover letter pre-execution validation rejection: {exc}"
+            ) from exc
+
+    def _infer_cover_paragraph_field_from_error(self, error: str) -> str | None:
+        lowered = error.casefold()
+        for slot in ("body_paragraph_2", "body_paragraph_1"):
+            if slot.replace("_", " ") in lowered or slot in lowered:
+                return slot
+        if "body paragraph" in lowered or "body text" in lowered:
+            return "body_paragraph_1"
+        return None
+
     @staticmethod
     def _concise_company_details(job: Any) -> str:
         words = job.company_details.split()
@@ -1815,10 +2406,13 @@ class JobSearchAgentRuntime:
                 continue
             if not _skill_is_job_relevant(cleaned, job):
                 continue
+            validated_citation = self._resolve_validated_skill_citation(cleaned)
+            if validated_citation is None:
+                continue
             registry[canonical] = _AllowedCoverSkill(
                 display_name=cleaned,
                 canonical=canonical,
-                citation=self._cover_letter_skill_citation(cleaned),
+                citation=validated_citation,
             )
         self._cover_letter_skill_registry_cache[job_id] = registry
         return registry
@@ -1871,8 +2465,6 @@ class JobSearchAgentRuntime:
         reconciled = self._reconcile_tailoring_evidence(job_id)
         finalized = self.state.finalized_resumes[job_id]
         skill_registry = self._build_cover_letter_allowed_skill_registry(job_id)
-        bullet_corpus = self._candidate_bullet_corpus()
-        allowed_numeric = sorted(set(_COVER_NUMBER_PATTERN.findall(bullet_corpus)))
         memory_facts = [
             {
                 "fact_type": fact.fact_type,
@@ -1882,28 +2474,22 @@ class JobSearchAgentRuntime:
             }
             for fact in self.registry.memory.facts
         ]
-        strengths = sorted(
-            {
-                *reconciled.aligned_skills,
-                *reconciled.evidenced_elsewhere_skills,
-            }
-        )
         allowed_hooks, fallback_used = self._ensure_allowed_company_hooks_for_job(job_id)
+        allowed_claims = self._allowed_candidate_claim_texts(job_id)
         return {
             "target_job_id": job_id,
             "rank": self._target_rank(job_id),
             "title": job.title,
             "company": job.company,
             "allowed_company_hooks": allowed_hooks,
+            "allowed_candidate_claims": allowed_claims,
             "approved_resume_revision": finalized.approved_revision_round,
             "finalized_resume_summary": (
                 f"Approved revision {finalized.approved_revision_round} resume "
                 f"for {job.title} at {job.company}."
             ),
-            "supported_strengths": strengths,
             "allowed_skills": self._select_model_visible_skills(job_id),
             "do_not_claim_skills": reconciled.genuine_gaps,
-            "allowed_numeric_claims": allowed_numeric,
             "current_memory_facts": memory_facts,
             "paragraph_count_requirement": "1 or 2",
             "one_page_required": True,
@@ -2121,6 +2707,42 @@ class JobSearchAgentRuntime:
             field for field in patch_fields if field in _COVER_PATCHABLE_FIELDS
         ]
         if contract.get("cover_recovery_mode") == "patch" and self._cover_letter_patch_recovery:
+            if error and (
+                "extra fields" in error.casefold()
+                or "extra inputs are not permitted" in error.casefold()
+            ):
+                self._cover_letter_patch_recovery["rejected_category"] = "draft_schema"
+                return
+            new_fields = patch_fields or (
+                self._cover_patch_fields_from_error(error or "", audit)
+                if error
+                else []
+            )
+            new_fields = [
+                field for field in new_fields if field in _COVER_PATCHABLE_FIELDS
+            ]
+            if new_fields:
+                merged_fields = sorted(
+                    {
+                        *self._cover_letter_patch_recovery.get("patch_fields", []),
+                        *new_fields,
+                    }
+                )
+                self._cover_letter_patch_recovery["patch_fields"] = merged_fields
+                base_draft = self._cover_letter_patch_recovery["base_draft"]
+                self._cover_letter_patch_recovery["preserved_fields"] = [
+                    field
+                    for field in (
+                        "decision_summary",
+                        "company_hook_phrase",
+                        "body_paragraph_1",
+                        "body_paragraph_2",
+                        "skills",
+                        "closing_sentence",
+                        "plan_rationale",
+                    )
+                    if field in base_draft and field not in merged_fields
+                ]
             self._cover_letter_patch_recovery["rejected_category"] = rejected_category
             return
         if not self._is_complete_cover_draft(raw_call.arguments):
@@ -2168,20 +2790,45 @@ class JobSearchAgentRuntime:
             fields.append("company_hook_phrase")
         if (
             "skills" in lowered
-            or "between 3 and 8" in lowered
-            or "duplicate skill" in lowered
-            or "unsupported skill" in lowered
-        ):
-            fields.append("skills")
-        for slot in ("body_paragraph_1", "body_paragraph_2"):
-            if slot.replace("_", " ") in lowered or slot in lowered:
-                fields.append(slot)
+            and "required skill" not in lowered
+            and "unsupported required skill" not in lowered
+            and "claims required skill" not in lowered
+        ) or "between 3 and 8" in lowered or "duplicate skill" in lowered:
+            if (
+                "unsupported skill" in lowered
+                or "between 3 and 8" in lowered
+                or "duplicate skill" in lowered
+                or (
+                    "skills" in lowered
+                    and "body" not in lowered
+                    and "paragraph" not in lowered
+                )
+            ):
+                fields.append("skills")
+        paragraph_field = self._infer_cover_paragraph_field_from_error(error)
+        if paragraph_field is not None:
+            fields.append(paragraph_field)
+        if (
+            "claims required skill" in lowered
+            or "without candidate evidence" in lowered
+            or "unsupported numeric" in lowered
+            or "numeric claim" in lowered
+            or "allowed_candidate_claim" in lowered
+            or "genuine-gap" in lowered
+            or "introduces capability not supported" in lowered
+            or "unsupported required skill" in lowered
+        ) and paragraph_field is None:
+            fields.append("body_paragraph_1")
         if "closing_sentence" in lowered:
             fields.append("closing_sentence")
         if "plan_rationale" in lowered:
             fields.append("plan_rationale")
-        if "body paragraph" in lowered and "body_paragraph_1" not in fields:
-            fields.append("body_paragraph_1")
+        if (
+            "cover-letter skill" in lowered
+            or "cannot present genuine-gap skill" in lowered
+            or "not relevant to supplied job" in lowered
+        ):
+            fields.append("skills")
         return sorted(set(fields))
 
     @staticmethod
@@ -2212,12 +2859,12 @@ class JobSearchAgentRuntime:
         error: str,
         contract: dict[str, Any],
     ) -> bool:
-        if contract.get("cover_recovery_mode") == "patch" and (
-            "transport rejection" in error.casefold()
-        ):
+        if contract.get("cover_recovery_mode") == "patch":
             return False
         if "transport rejection" in error.casefold():
             return True
+        if "rejected the requested call" in error.casefold():
+            return False
         return False
 
     def _clear_cover_patch_recovery(self) -> None:
@@ -2246,84 +2893,6 @@ class JobSearchAgentRuntime:
                     return True
         return False
 
-    def _memory_fact_citation(self, fact: Any) -> dict[str, Any]:
-        source_field = "skill_tags" if fact.fact_type == "skill" else "statement"
-        evidence_id = fact.evidence_refs[0] if fact.evidence_refs else None
-        return {
-            "source_type": "memory_fact",
-            "source_id": fact.fact_id,
-            "source_field": source_field,
-            "evidence_id": evidence_id,
-        }
-
-    def _cover_letter_paragraph_citations(
-        self,
-        job_id: str,
-        paragraph_index: int,
-        paragraph_text: str,
-    ) -> list[dict[str, Any]]:
-        assert self.registry is not None
-        citations: list[dict[str, Any]] = [
-            {
-                "source_type": "job_posting",
-                "source_id": job_id,
-                "source_field": "job_description",
-                "evidence_id": None,
-            }
-        ]
-        if paragraph_index == 0:
-            citations.extend(
-                [
-                    {
-                        "source_type": "experience_bullet",
-                        "source_id": "exp-primary-bullet-2",
-                        "source_field": "text",
-                        "evidence_id": "EV-EXP-BULLET-002",
-                    },
-                    {
-                        "source_type": "portfolio_project",
-                        "source_id": "proj-carepath-rag",
-                        "source_field": "short_description",
-                        "evidence_id": "EV-PROJ-001",
-                    },
-                    {
-                        "source_type": "finalized_resume",
-                        "source_id": job_id,
-                        "source_field": "approved_revision_round",
-                        "evidence_id": None,
-                    },
-                ]
-            )
-        else:
-            citations.extend(
-                [
-                    {
-                        "source_type": "experience_bullet",
-                        "source_id": "exp-primary-bullet-3",
-                        "source_field": "text",
-                        "evidence_id": "EV-EXP-BULLET-003",
-                    },
-                    {
-                        "source_type": "portfolio_project",
-                        "source_id": "proj-model-watch",
-                        "source_field": "short_description",
-                        "evidence_id": "EV-PROJ-003",
-                    },
-                ]
-            )
-        for fact in self.registry.memory.facts:
-            if self._paragraph_uses_memory_fact(paragraph_text, fact):
-                citations.append(self._memory_fact_citation(fact))
-        citations.sort(
-            key=lambda item: (
-                str(item.get("source_type", "")),
-                str(item.get("source_id", "")),
-                str(item.get("source_field", "")),
-                str(item.get("evidence_id") or ""),
-            )
-        )
-        return citations
-
     def _build_hydrated_cover_letter_plan(
         self,
         transport_args: dict[str, Any],
@@ -2331,22 +2900,6 @@ class JobSearchAgentRuntime:
     ) -> dict[str, Any]:
         semantic = self._semantic_cover_letter_draft(transport_args)
         skill_registry = self._build_cover_letter_allowed_skill_registry(job_id)
-        body_paragraphs: list[dict[str, Any]] = []
-        paragraph_specs = [semantic.body_paragraph_1]
-        if semantic.body_paragraph_2 is not None:
-            paragraph_specs.append(semantic.body_paragraph_2)
-        for index, paragraph in enumerate(paragraph_specs):
-            body_paragraphs.append(
-                {
-                    "text": paragraph.text,
-                    "reason": paragraph.reason,
-                    "citations": self._cover_letter_paragraph_citations(
-                        job_id,
-                        index,
-                        paragraph.text,
-                    ),
-                }
-            )
         skill_items: list[dict[str, Any]] = []
         for skill in semantic.skills:
             canonical = (
@@ -2364,6 +2917,23 @@ class JobSearchAgentRuntime:
                     "citations": [copy.deepcopy(allowed.citation)],
                 }
             )
+        body_paragraphs: list[dict[str, Any]] = []
+        paragraph_specs = [semantic.body_paragraph_1]
+        if semantic.body_paragraph_2 is not None:
+            paragraph_specs.append(semantic.body_paragraph_2)
+        for paragraph in paragraph_specs:
+            body_paragraphs.append(
+                {
+                    "text": paragraph.text,
+                    "reason": paragraph.reason,
+                    "citations": self._close_paragraph_citations(
+                        job_id,
+                        paragraph.text,
+                        skill_items,
+                    ),
+                }
+            )
+        self._ensure_cover_body_source_requirements(job_id, body_paragraphs)
         return {
             "job_id": job_id,
             "company_hook_phrase": semantic.company_hook_phrase,
@@ -2473,8 +3043,6 @@ class JobSearchAgentRuntime:
                 )
             )
         bullet_corpus = self._candidate_bullet_corpus()
-        allowed_numeric = sorted(set(_COVER_NUMBER_PATTERN.findall(bullet_corpus)))
-        allowed_claim_text = bullet_corpus + " " + " ".join(allowed_numeric)
         for field, paragraph in present_paragraphs:
             text = str(paragraph.get("text", ""))
             reason = str(paragraph.get("reason", ""))
@@ -2505,19 +3073,24 @@ class JobSearchAgentRuntime:
                         ),
                     )
                 )
-            if re.search(
-                r"14%\s+improvement\s+in\s+model\s+performance",
-                text,
-                flags=re.IGNORECASE,
-            ):
+            if not self._paragraph_has_allowed_candidate_claim(text, target_job_id):
                 issues.append(
                     _CoverLetterAuditIssue(
                         field=field,
-                        category="evidence",
+                        category="semantic_text",
                         message=(
-                            f"{field} contains unsupported numeric claim "
-                            "'14% improvement in model performance'"
+                            f"{field} must include at least one exact "
+                            "allowed_candidate_claim"
                         ),
+                    )
+                )
+            numeric_issue = self._audit_numeric_claim_integrity(text, target_job_id)
+            if numeric_issue is not None:
+                issues.append(
+                    _CoverLetterAuditIssue(
+                        field=field,
+                        category="semantic_text",
+                        message=f"{field} {numeric_issue}",
                     )
                 )
             gap = self._text_claims_genuine_gap(text, reconciled)
@@ -2543,14 +3116,6 @@ class JobSearchAgentRuntime:
                             f"{field} claims unsupported required skill "
                             f"{unsupported!r}"
                         ),
-                    )
-                )
-            for number in self._unsupported_numbers(text, allowed_claim_text):
-                issues.append(
-                    _CoverLetterAuditIssue(
-                        field=field,
-                        category="evidence",
-                        message=f"{field} contains unsupported numeric claim {number!r}",
                     )
                 )
         skills = transport_args.get("skills")
@@ -2658,6 +3223,18 @@ class JobSearchAgentRuntime:
     @staticmethod
     def _classify_cover_letter_rejection(error: str) -> str:
         lowered = error.casefold()
+        if "pre-execution validation rejection" in lowered:
+            if "numeric claim" in lowered or "unsupported numeric" in lowered:
+                return "semantic_text"
+            if any(marker in lowered for marker in _COVER_CITATION_ERROR_MARKERS):
+                return "citation"
+            if (
+                "claims required skill" in lowered
+                or "genuine-gap" in lowered
+                or "unsupported required skill" in lowered
+            ):
+                return "evidence"
+            return "validation"
         if "transport rejection" in lowered:
             return "draft_schema"
         if "draft schema rejection" in lowered:
@@ -2725,15 +3302,55 @@ class JobSearchAgentRuntime:
             )
             if isinstance(plan, dict) and isinstance(plan.get("skills"), list):
                 selected_count = len(plan["skills"])
+        memory_citation_count = 0
+        memory_without_evidence = 0
+        paragraph_skill_citation_count = 0
+        exact_claim_match_count = 0
+        if isinstance(plan, dict) and target_job_id:
+            for paragraph in plan.get("body_paragraphs", []) or []:
+                if not isinstance(paragraph, dict):
+                    continue
+                paragraph_text = str(paragraph.get("text", ""))
+                exact_claim_match_count += len(
+                    self._detect_allowed_claims_in_text(paragraph_text, target_job_id)
+                )
+                for citation in paragraph.get("citations") or []:
+                    if not isinstance(citation, dict):
+                        continue
+                    if citation.get("source_type") == "memory_fact":
+                        memory_citation_count += 1
+                        if not citation.get("evidence_id"):
+                            memory_without_evidence += 1
+                    if citation.get("source_type") in {
+                        "experience",
+                        "experience_bullet",
+                        "portfolio_project",
+                        "education",
+                        "master_skill",
+                        "evidence_registry",
+                        "memory_fact",
+                    }:
+                        paragraph_skill_citation_count += 1
+        allowed_claim_count = (
+            len(self._build_allowed_candidate_claims(target_job_id))
+            if target_job_id
+            else 0
+        )
         diagnostics = {
             "cover_letter_compact_draft": True,
             "cover_letter_hydration_applied": True,
+            "cover_letter_paragraph_citation_closure_applied": True,
             "model_argument_mode": "cover_letter_text_draft",
             "raw_model_argument_char_count": raw_size,
             "hydrated_argument_char_count": hydrated_size,
             "cover_letter_allowed_skill_count": allowed_count,
             "cover_letter_selected_skill_count": selected_count,
             "cover_letter_citation_count": citation_count,
+            "cover_letter_memory_citation_count": memory_citation_count,
+            "cover_letter_memory_citations_without_evidence_id": memory_without_evidence,
+            "cover_letter_paragraph_skill_citation_count": paragraph_skill_citation_count,
+            "cover_letter_allowed_claim_count": allowed_claim_count,
+            "cover_letter_exact_claim_match_count": exact_claim_match_count,
             "phase": contract["phase"],
             "target_rank": contract.get("target_rank"),
         }
@@ -3870,6 +4487,16 @@ class JobSearchAgentRuntime:
                     execution_call,
                     contract,
                 )
+                self._prevalidate_hydrated_cover_letter_plan(
+                    execution_call.arguments["plan"],
+                    contract["target_job_id"],
+                )
+                if self._last_generation_span is not None:
+                    existing = self._last_generation_span.record.metadata or {}
+                    self._last_generation_span.record.metadata = {
+                        **existing,
+                        "cover_letter_preexecution_validation_passed": True,
+                    }
             self._validate_call_for_contract(execution_call, contract)
             baseline_arguments = self.registry.parse_arguments(
                 execution_call.name,

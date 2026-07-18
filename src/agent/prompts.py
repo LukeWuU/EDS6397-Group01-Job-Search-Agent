@@ -203,8 +203,8 @@ COVER_LETTER_PLAN_LIMITS = [
     "closing_sentence: at most 25 words",
     "plan_rationale: at most 25 words",
     "Include between 3 and 8 skills.",
-    "Use the minimum sufficient citations.",
-    "Every paragraph and skill requires candidate-side evidence citations.",
+    "Each body paragraph must include at least one exact allowed_candidate_claim.",
+    "Copy numeric allowed_candidate_claims character-for-character.",
     "Return exactly one tool call with no prose outside the tool call.",
 ]
 
@@ -217,6 +217,15 @@ COVER_LETTER_NORMAL_CONSTRAINTS = [
         "Select exactly one company_hook_phrase from target_context.allowed_company_hooks. "
         "Copy it character-for-character. Do not paraphrase, shorten, expand, combine, "
         "or rewrite it."
+    ),
+    (
+        "Each body paragraph must include at least one exact claim from "
+        "target_context.allowed_candidate_claims. Copy the claim text "
+        "character-for-character, especially numeric metrics, qualifiers, and outcomes."
+    ),
+    (
+        "Do not reinterpret numeric claims. Never change recall, lookup time, retrieval, "
+        "MAE, or other documented metrics when reusing a number from allowed_candidate_claims."
     ),
     (
         "Choose 3–8 skills only from the provided allowed_skills list. Do not copy "

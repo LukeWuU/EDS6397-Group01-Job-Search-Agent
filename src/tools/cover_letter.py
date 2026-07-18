@@ -1136,17 +1136,17 @@ def _prepare_output_paths(output_dir: Path) -> tuple[Path, Path, Path]:
     return tex_path, pdf_path, evidence_path
 
 
-def cover_letter_tool(
+def validate_cover_letter_plan(
+    plan: CoverLetterPlan,
+    *,
     job: Job,
     job_score: JobScore,
     fit_analysis: FitAnalysisResult,
     bundle: CandidateBundle,
     memory: CandidateMemory,
     finalized_resume: FinalizedResumeResult,
-    output_dir: Path,
-    plan: CoverLetterPlan,
-) -> CoverLetterResult:
-    """Validate, render, compile, and log one evidence-grounded cover letter."""
+) -> CoverLetterCitation:
+    """Pure validation for a cover letter plan; no rendering or file writes."""
     if job.job_id != job_score.job_id:
         raise CoverLetterInputMismatchError(
             "job.job_id does not match job_score.job_id"
@@ -1213,6 +1213,68 @@ def cover_letter_tool(
     ]
     for citation in all_citations:
         resolve(citation)
+    candidate_count = sum(
+        citation.source_type in _CANDIDATE_SOURCE_TYPES
+        for citation in all_citations
+    )
+    job_count = sum(
+        citation.source_type in _JOB_SOURCE_TYPES
+        for citation in all_citations
+    )
+    if candidate_count <= 0:
+        raise CoverLetterEvidenceError(
+            "Cover letter requires candidate-source citations"
+        )
+    if job_count <= 0:
+        raise CoverLetterEvidenceError("Cover letter requires job-source citations")
+    return hook_citation
+
+
+def cover_letter_tool(
+    job: Job,
+    job_score: JobScore,
+    fit_analysis: FitAnalysisResult,
+    bundle: CandidateBundle,
+    memory: CandidateMemory,
+    finalized_resume: FinalizedResumeResult,
+    output_dir: Path,
+    plan: CoverLetterPlan,
+) -> CoverLetterResult:
+    """Validate, render, compile, and log one evidence-grounded cover letter."""
+    if job.job_id != job_score.job_id:
+        raise CoverLetterInputMismatchError(
+            "job.job_id does not match job_score.job_id"
+        )
+    if job.job_id != fit_analysis.job_id:
+        raise CoverLetterInputMismatchError(
+            "job.job_id does not match fit_analysis.job_id"
+        )
+    if plan.job_id != job.job_id:
+        raise CoverLetterInputMismatchError("plan.job_id does not match job.job_id")
+    if memory.candidate_id != bundle.profile.candidate_id:
+        raise CoverLetterInputMismatchError(
+            "memory.candidate_id does not match candidate bundle"
+        )
+    _validate_finalized_resume(finalized_resume, job=job)
+    hook_citation = validate_cover_letter_plan(
+        plan,
+        job=job,
+        job_score=job_score,
+        fit_analysis=fit_analysis,
+        bundle=bundle,
+        memory=memory,
+        finalized_resume=finalized_resume,
+    )
+
+    all_citations = [
+        hook_citation,
+        *(
+            citation
+            for paragraph in plan.body_paragraphs
+            for citation in paragraph.citations
+        ),
+        *(citation for skill in plan.skills for citation in skill.citations),
+    ]
     candidate_count = sum(
         citation.source_type in _CANDIDATE_SOURCE_TYPES
         for citation in all_citations
