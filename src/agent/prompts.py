@@ -213,7 +213,11 @@ COVER_LETTER_NORMAL_CONSTRAINTS = [
     "job_id must equal TARGET_JOB_ID.",
     "Write company_hook_phrase only; Python sets company_hook_source_field.",
     "Provide body_paragraph_1 and optional body_paragraph_2 with text and reason only.",
-    "Select 3 to 8 unique skills from target_context.allowed_skills only.",
+    (
+        "Choose 3–8 skills only from the provided allowed_skills list. Do not copy "
+        "every option unless the list itself contains eight or fewer and every "
+        "selected skill is needed."
+    ),
     "Do not claim skills listed in target_context.do_not_claim_skills.",
     "Ground company_hook_phrase in target_context.company_details_excerpt.",
     "Use approved memory facts from target_context.current_memory_facts when relevant.",

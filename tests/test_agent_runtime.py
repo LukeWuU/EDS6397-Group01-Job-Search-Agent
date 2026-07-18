@@ -77,6 +77,7 @@ class ScriptedClient:
                 "message_count": len(messages),
                 "messages": list(messages),
                 "tool_names": [item["function"]["name"] for item in tools],
+                "tools": list(tools),
                 "client_id": id(self),
             }
         )
@@ -2330,24 +2331,37 @@ def test_cover_letter_compact_schema_forbids_identity_fields():
         )
 
 
-def test_cover_letter_compact_schema_rejects_too_many_skills():
-    with pytest.raises(Exception):
-        _CoverLetterTextDraft.model_validate(
-            {
-                "decision_summary": "Draft cover letter.",
-                "job_id": "job-1",
-                "company_hook_phrase": "one two three four five",
-                "body_paragraph_1": {
-                    "text": "word " * 40,
-                    "reason": "Evidence-grounded paragraph.",
-                },
-                "skills": [f"Skill-{index}" for index in range(10)],
-                "closing_sentence": "I welcome the opportunity to discuss my fit.",
-                "plan_rationale": "Use only supplied evidence.",
-            }
-        )
+def test_cover_letter_transport_accepts_eleven_skills():
+    draft = _CoverLetterTextDraft.model_validate(
+        {
+            "decision_summary": "Draft cover letter.",
+            "job_id": "job-1",
+            "company_hook_phrase": "one two three four five",
+            "body_paragraph_1": {
+                "text": "word " * 40,
+                "reason": "Evidence-grounded paragraph.",
+            },
+            "skills": [f"Skill-{index}" for index in range(11)],
+            "closing_sentence": "I welcome the opportunity to discuss my fit.",
+            "plan_rationale": "Use only supplied evidence.",
+        }
+    )
+    assert len(draft.skills) == 11
 
 
+def _cover_schema_properties(runtime, contract):
+    schemas = runtime._model_schemas_for_contract(contract)
+    parameters = schemas[0]["function"]["parameters"]
+    return set(parameters.get("properties", {})), parameters
+
+
+def _patch_contract_from_recovery(runtime, contract, recovery):
+    return {
+        **contract,
+        "cover_patch_fields": recovery["patch_fields"],
+        "cover_recovery_mode": "patch",
+        "required_argument_shape": recovery["required_argument_shape"],
+    }
 def test_cover_letter_hydration_injects_company_details_field(tmp_path):
     runtime = _runtime_at_cover_letter(tmp_path)
     contract, call = _valid_compact_cover_call(runtime)
@@ -2422,11 +2436,19 @@ def test_cover_letter_skill_repair_preserves_valid_hook(tmp_path):
     runtime = _runtime_at_cover_letter(tmp_path)
     contract, call = _valid_compact_cover_call(runtime)
     base_hook = call.arguments["company_hook_phrase"]
+    registry = runtime._build_cover_letter_allowed_skill_registry(
+        contract["target_job_id"]
+    )
+    eleven_skills = [entry.display_name for entry in registry.values()][:11]
+    if len(eleven_skills) < 9:
+        eleven_skills = eleven_skills + [
+            f"Extra-{index}" for index in range(9 - len(eleven_skills))
+        ]
     bad_skills_call = _tool(
         "generate_cover_letter",
         {
             **call.arguments,
-            "skills": [f"Skill-{index}" for index in range(10)],
+            "skills": eleven_skills,
         },
         2,
     )
@@ -2437,13 +2459,23 @@ def test_cover_letter_skill_repair_preserves_valid_hook(tmp_path):
     )
     recovery = json.loads(runtime.conversation[-1]["content"])
     assert recovery["error_category"] == "draft_schema"
-    assert runtime._cover_letter_patch_recovery is None
+    assert runtime._cover_letter_patch_recovery is not None
+    assert recovery["patch_fields"] == ["skills"]
+    assert (
+        runtime._cover_letter_patch_recovery["base_draft"]["company_hook_phrase"]
+        == base_hook
+    )
+    patch_contract = _patch_contract_from_recovery(runtime, contract, recovery)
+    properties, parameters = _cover_schema_properties(runtime, patch_contract)
+    assert properties == {"job_id", "skills"}
+    assert parameters.get("additionalProperties") is False
+    assert sorted(parameters.get("required", [])) == ["job_id", "skills"]
     polluted = copy.deepcopy(call.arguments)
     polluted["skills"] = ["Python", "RAG", "Evaluation", "Docker"]
     runtime.state.model_call_count = 2
     runtime._execute_response_calls(
         NormalizedAssistantMessage(tool_calls=[_tool("generate_cover_letter", polluted, 3)]),
-        contract,
+        patch_contract,
     )
     assert runtime._cover_letter_patch_recovery is not None
     assert (
@@ -2464,11 +2496,11 @@ def test_cover_letter_audit_collects_multiple_issues(tmp_path):
             + " I also claim evaluation expertise throughout."
         ),
     }
-    hydrated = runtime._hydrate_cover_letter_call(
+    transport = runtime._resolve_cover_letter_transport_arguments(
         _tool("generate_cover_letter", polluted, 1),
         contract,
     )
-    audit = runtime._audit_hydrated_cover_letter_draft(hydrated, contract)
+    audit = runtime._audit_cover_letter_transport(transport, contract)
     fields = audit.fields
     assert "company_hook_phrase" in fields
     assert "body_paragraph_1" in fields
@@ -2478,8 +2510,8 @@ def test_cover_letter_audit_collects_multiple_issues(tmp_path):
 def test_cover_letter_valid_fixture_passes_audit(tmp_path):
     runtime = _runtime_at_cover_letter(tmp_path)
     contract, call = _valid_compact_cover_call(runtime)
-    hydrated = runtime._hydrate_cover_letter_call(call, contract)
-    audit = runtime._audit_hydrated_cover_letter_draft(hydrated, contract)
+    transport = runtime._resolve_cover_letter_transport_arguments(call, contract)
+    audit = runtime._audit_cover_letter_transport(transport, contract)
     audit.raise_if_issues()
 
 
@@ -2656,3 +2688,360 @@ def test_all_top3_cover_letters_share_one_letter_date(tmp_path):
         dates.append(hydrated.arguments["plan"]["letter_date"])
     assert dates == ["2026-11-21", "2026-11-21", "2026-11-21"]
     date.fromisoformat(dates[0])
+
+
+def test_cover_letter_initial_schema_uses_compact_transport(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    properties, parameters = _cover_schema_properties(runtime, contract)
+    assert "decision_summary" in properties
+    assert "company_hook_phrase" in properties
+    assert "body_paragraph_1" in properties
+    assert "skills" in properties
+    assert "company_hook_source_field" not in properties
+    assert parameters.get("additionalProperties") is False
+
+
+def test_cover_letter_visible_skills_at_most_eight_for_top3(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    ids = runtime.state.top_3_job_ids
+    counts: list[int] = []
+    for rank in range(1, 4):
+        runtime.state.cover_letters = {
+            ids[index]: object() for index in range(rank - 1)
+        }
+        contract = runtime._next_action_contract()
+        visible = contract["target_context"]["allowed_skills"]
+        counts.append(len(visible))
+        assert 3 <= len(visible) <= 8
+    assert all(count <= 8 for count in counts)
+
+
+def test_cover_letter_call11_skills_patch_preserves_valid_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
+    )
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    base = copy.deepcopy(call.arguments)
+    registry = runtime._build_cover_letter_allowed_skill_registry(
+        contract["target_job_id"]
+    )
+    eleven_skills = [entry.display_name for entry in registry.values()]
+    while len(eleven_skills) < 11:
+        eleven_skills.append(f"Pad-{len(eleven_skills)}")
+    eleven_skills = eleven_skills[:11]
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "generate_cover_letter",
+                    {**base, "skills": eleven_skills},
+                    2,
+                )
+            ]
+        ),
+        contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["patch_fields"] == ["skills"]
+    preserved = runtime._cover_letter_patch_recovery["base_draft"]
+    assert preserved["company_hook_phrase"] == base["company_hook_phrase"]
+    assert preserved["body_paragraph_1"] == base["body_paragraph_1"]
+    assert preserved["closing_sentence"] == base["closing_sentence"]
+    assert preserved["plan_rationale"] == base["plan_rationale"]
+    patch_contract = runtime._next_action_contract()
+    properties, parameters = _cover_schema_properties(runtime, patch_contract)
+    assert properties == {"job_id", "skills"}
+    assert parameters.get("additionalProperties") is False
+    valid_skills = list(base["skills"][:8])
+    runtime.state.model_call_count = 2
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "generate_cover_letter",
+                    {
+                        "job_id": contract["target_job_id"],
+                        "skills": valid_skills,
+                    },
+                    3,
+                )
+            ]
+        ),
+        patch_contract,
+    )
+    assert valid == 1
+    assert invalid == 0
+    merged = runtime._cover_letter_patch_recovery
+    assert merged is None
+    assert preserved["company_hook_phrase"] == base["company_hook_phrase"]
+
+
+def test_cover_letter_sixteen_word_hook_patch_preserves_skills(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    base_skills = copy.deepcopy(call.arguments["skills"])
+    sixteen_word_hook = (
+        "Chickasaw Nation Industries is leveraging cutting-edge technology to "
+        "deliver innovative solutions to federal and commercial customers."
+    )
+    assert len(sixteen_word_hook.split()) == 16
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "generate_cover_letter",
+                    {
+                        **call.arguments,
+                        "company_hook_phrase": sixteen_word_hook,
+                    },
+                    2,
+                )
+            ]
+        ),
+        contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["error_category"] == "semantic_text"
+    assert recovery["patch_fields"] == ["company_hook_phrase"]
+    patch_contract = runtime._next_action_contract()
+    properties, _ = _cover_schema_properties(runtime, patch_contract)
+    assert properties == {"job_id", "company_hook_phrase"}
+    preserved_base = copy.deepcopy(
+        runtime._cover_letter_patch_recovery["base_draft"]
+    )
+    runtime.state.model_call_count = 2
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "generate_cover_letter",
+                    {
+                        "job_id": contract["target_job_id"],
+                        "company_hook_phrase": call.arguments["company_hook_phrase"],
+                    },
+                    3,
+                )
+            ]
+        ),
+        patch_contract,
+    )
+    assert valid == 1
+    assert invalid == 0
+    merged_transport = runtime._merge_cover_patch(
+        preserved_base,
+        {
+            "job_id": contract["target_job_id"],
+            "company_hook_phrase": call.arguments["company_hook_phrase"],
+        },
+        ["company_hook_phrase"],
+    )
+    assert merged_transport["skills"] == base_skills
+
+
+def test_cover_letter_combined_hook_and_skills_patch_schema(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    registry = runtime._build_cover_letter_allowed_skill_registry(
+        contract["target_job_id"]
+    )
+    eleven_skills = [entry.display_name for entry in registry.values()]
+    while len(eleven_skills) < 11:
+        eleven_skills.append(f"Pad-{len(eleven_skills)}")
+    sixteen_word_hook = (
+        "Chickasaw Nation Industries is leveraging cutting-edge technology to "
+        "deliver innovative solutions to federal and commercial customers."
+    )
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "generate_cover_letter",
+                    {
+                        **call.arguments,
+                        "skills": eleven_skills[:11],
+                        "company_hook_phrase": sixteen_word_hook,
+                    },
+                    2,
+                )
+            ]
+        ),
+        contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert set(recovery["patch_fields"]) == {"company_hook_phrase", "skills"}
+    patch_contract = runtime._next_action_contract()
+    properties, parameters = _cover_schema_properties(runtime, patch_contract)
+    assert properties == {"job_id", "company_hook_phrase", "skills"}
+    assert sorted(parameters.get("required", [])) == sorted(properties)
+
+
+def test_cover_letter_hook_patch_rejects_full_draft_response(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    base_skills = copy.deepcopy(call.arguments["skills"])
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "generate_cover_letter",
+                    {
+                        **call.arguments,
+                        "company_hook_phrase": "invented marketing phrase without grounding",
+                    },
+                    2,
+                )
+            ]
+        ),
+        contract,
+    )
+    patch_contract = runtime._next_action_contract()
+    runtime.state.model_call_count = 2
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[call]),
+        patch_contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["error_category"] == "draft_schema"
+    assert recovery["patch_fields"] == ["company_hook_phrase"]
+    assert runtime._cover_letter_patch_recovery["base_draft"]["skills"] == base_skills
+    properties, _ = _cover_schema_properties(runtime, patch_contract)
+    assert properties == {"job_id", "company_hook_phrase"}
+
+
+def test_cover_letter_rejects_generic_performance_claim(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    polluted = copy.deepcopy(call.arguments)
+    polluted["body_paragraph_1"] = {
+        **polluted["body_paragraph_1"],
+        "text": (
+            polluted["body_paragraph_1"]["text"]
+            + " This work delivered a 14% improvement in model performance."
+        ),
+    }
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[_tool("generate_cover_letter", polluted, 2)]
+        ),
+        contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["error_category"] == "evidence"
+    assert recovery["patch_fields"] == ["body_paragraph_1"]
+    patch_contract = runtime._next_action_contract()
+    properties, _ = _cover_schema_properties(runtime, patch_contract)
+    assert properties == {"job_id", "body_paragraph_1"}
+    assert (
+        runtime._cover_letter_patch_recovery["base_draft"]["company_hook_phrase"]
+        == call.arguments["company_hook_phrase"]
+    )
+    assert (
+        runtime._cover_letter_patch_recovery["base_draft"]["skills"]
+        == call.arguments["skills"]
+    )
+
+
+def test_cover_letter_patch_model_call_metadata(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    registry = runtime._build_cover_letter_allowed_skill_registry(
+        contract["target_job_id"]
+    )
+    too_many_skills = [entry.display_name for entry in registry.values()]
+    while len(too_many_skills) < 9:
+        too_many_skills.append(f"Pad-{len(too_many_skills)}")
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "generate_cover_letter",
+                    {
+                        **call.arguments,
+                        "skills": too_many_skills[:9],
+                    },
+                    2,
+                )
+            ]
+        ),
+        contract,
+    )
+    patch_contract = runtime._next_action_contract()
+    schemas = runtime._model_schemas_for_contract(patch_contract)
+    diagnostics = runtime._model_call_diagnostics(patch_contract, schemas)
+    assert diagnostics["cover_letter_patch_recovery_applied"] is True
+    assert diagnostics["cover_letter_patch_fields"] == ["skills"]
+    assert diagnostics["cover_letter_preserved_field_count"] >= 1
+    assert diagnostics["cover_letter_rejected_category"] == "draft_schema"
+    assert diagnostics["cover_letter_allowed_skill_count"] <= 8
+
+
+def test_cover_letter_initial_model_call_metadata(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    schemas = runtime._model_schemas_for_contract(contract)
+    diagnostics = runtime._model_call_diagnostics(contract, schemas)
+    assert diagnostics["cover_letter_patch_recovery_applied"] is False
+    assert diagnostics["cover_letter_allowed_skill_count"] <= 8
+
+
+def test_cover_letter_top3_payload_sizes_and_patch_schemas(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    ids = runtime.state.top_3_job_ids
+    initial_sizes: list[int] = []
+    visible_counts: list[int] = []
+    for rank in range(1, 4):
+        runtime.state.cover_letters = {
+            ids[index]: object() for index in range(rank - 1)
+        }
+        contract = runtime._next_action_contract()
+        messages = _current_cover_letter_messages(runtime, contract)
+        initial_sizes.append(len(json.dumps(messages, separators=(",", ":"))))
+        visible = contract["target_context"]["allowed_skills"]
+        visible_counts.append(len(visible))
+        initial_schema = runtime._model_schemas_for_contract(contract)
+        hook_schema = runtime._model_schemas_for_contract(
+            {
+                **contract,
+                "cover_patch_fields": ["company_hook_phrase"],
+                "cover_recovery_mode": "patch",
+            }
+        )
+        skills_schema = runtime._model_schemas_for_contract(
+            {
+                **contract,
+                "cover_patch_fields": ["skills"],
+                "cover_recovery_mode": "patch",
+            }
+        )
+        combined_schema = runtime._model_schemas_for_contract(
+            {
+                **contract,
+                "cover_patch_fields": ["company_hook_phrase", "skills"],
+                "cover_recovery_mode": "patch",
+            }
+        )
+        paragraph_schema = runtime._model_schemas_for_contract(
+            {
+                **contract,
+                "cover_patch_fields": ["body_paragraph_1"],
+                "cover_recovery_mode": "patch",
+            }
+        )
+        assert len(json.dumps(hook_schema)) < len(json.dumps(initial_schema))
+        assert len(json.dumps(skills_schema)) < len(json.dumps(initial_schema))
+        assert len(json.dumps(combined_schema)) < len(json.dumps(initial_schema))
+        assert len(json.dumps(paragraph_schema)) < len(json.dumps(initial_schema))
+    assert max(initial_sizes) < 8731
+    assert all(count <= 8 for count in visible_counts)
+
+
+def test_assignment_tool_registry_still_has_five_tools():
+    assert len(AssignmentToolRegistry.model_schemas()) == 5

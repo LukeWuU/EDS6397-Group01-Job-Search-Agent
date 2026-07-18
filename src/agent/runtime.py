@@ -245,7 +245,7 @@ class _CoverLetterBodyParagraph(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=1)
-    reason: str = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=1)
 
     @field_validator("text", "reason")
     @classmethod
@@ -256,19 +256,19 @@ class _CoverLetterBodyParagraph(BaseModel):
         return value
 
 
-class _CoverLetterTextDraft(BaseModel):
-    """Compact model-facing cover letter draft."""
+class _CoverLetterTransportDraft(BaseModel):
+    """Compact transport layer for model-facing cover letter drafts."""
 
     model_config = ConfigDict(extra="forbid")
 
-    decision_summary: str = Field(min_length=1, max_length=500)
+    decision_summary: str = Field(min_length=1)
     job_id: str = Field(min_length=1)
     company_hook_phrase: str = Field(min_length=1)
     body_paragraph_1: _CoverLetterBodyParagraph
     body_paragraph_2: _CoverLetterBodyParagraph | None = None
-    skills: list[str] = Field(min_length=3, max_length=8)
+    skills: list[str] = Field(min_length=1)
     closing_sentence: str = Field(min_length=1)
-    plan_rationale: str = Field(min_length=1, max_length=200)
+    plan_rationale: str = Field(min_length=1)
 
     @field_validator(
         "decision_summary",
@@ -285,52 +285,41 @@ class _CoverLetterTextDraft(BaseModel):
 
     @field_validator("skills")
     @classmethod
-    def validate_unique_skills(cls, value: list[str]) -> list[str]:
+    def validate_skill_strings(cls, value: list[str]) -> list[str]:
         cleaned = [" ".join(skill.split()) for skill in value if skill.strip()]
         if len(cleaned) != len(value):
             raise ValueError("skills must be nonempty strings")
-        canonical = [
-            normalize_skill(skill, has_vector_search=True) or skill.casefold()
-            for skill in cleaned
-        ]
-        if len(set(canonical)) != len(cleaned):
-            raise ValueError("skills must be unique by canonical form")
         return cleaned
 
-    @field_validator("company_hook_phrase")
+
+class _CoverLetterSemanticDraft(BaseModel):
+    """Validated semantic cover letter draft after transport and audit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision_summary: str
+    job_id: str
+    company_hook_phrase: str
+    body_paragraph_1: _CoverLetterBodyParagraph
+    body_paragraph_2: _CoverLetterBodyParagraph | None = None
+    skills: list[str] = Field(min_length=3, max_length=8)
+    closing_sentence: str
+    plan_rationale: str
+
+    @field_validator("skills")
     @classmethod
-    def validate_hook_word_limit(cls, value: str) -> str:
-        if _word_count(value) > 15:
-            raise ValueError("company_hook_phrase must be at most 15 words")
+    def validate_unique_skills(cls, value: list[str]) -> list[str]:
+        canonical = [
+            normalize_skill(skill, has_vector_search=True) or skill.casefold()
+            for skill in value
+        ]
+        if len(set(canonical)) != len(value):
+            raise ValueError("skills must be unique by canonical form")
         return value
 
-    @field_validator("body_paragraph_1", "body_paragraph_2")
-    @classmethod
-    def validate_paragraph_word_limits(
-        cls,
-        value: _CoverLetterBodyParagraph | None,
-    ) -> _CoverLetterBodyParagraph | None:
-        if value is None:
-            return value
-        if _word_count(value.text) > 90:
-            raise ValueError("body paragraph text must be at most 90 words")
-        if _word_count(value.reason) > 18:
-            raise ValueError("body paragraph reason must be at most 18 words")
-        return value
 
-    @field_validator("closing_sentence")
-    @classmethod
-    def validate_closing_words(cls, value: str) -> str:
-        if _word_count(value) > 25:
-            raise ValueError("closing_sentence must be at most 25 words")
-        return value
-
-    @field_validator("plan_rationale")
-    @classmethod
-    def validate_plan_rationale_words(cls, value: str) -> str:
-        if _word_count(value) > 25:
-            raise ValueError("plan_rationale must be at most 25 words")
-        return value
+class _CoverLetterTextDraft(_CoverLetterTransportDraft):
+    """Backward-compatible alias for tests referencing the compact draft model name."""
 
 
 class _CoverLetterAuditIssue(BaseModel):
@@ -546,20 +535,36 @@ class JobSearchAgentRuntime:
                 diagnostics["patch_recovery_applied"] = True
                 diagnostics["patch_fields"] = contract.get("tailor_patch_fields", [])
         if contract["allowed_tool"] == "generate_cover_letter":
-            diagnostics["model_argument_mode"] = "cover_letter_text_draft"
+            diagnostics["model_argument_mode"] = (
+                "cover_letter_patch_draft"
+                if contract.get("cover_recovery_mode") == "patch"
+                else "cover_letter_text_draft"
+            )
             diagnostics["cover_letter_compact_draft"] = True
             diagnostics["cover_letter_hydration_applied"] = False
             target_job_id = contract.get("target_job_id")
             if target_job_id:
                 diagnostics["cover_letter_allowed_skill_count"] = len(
-                    self._build_cover_letter_allowed_skill_registry(target_job_id)
+                    self._select_model_visible_skills(target_job_id)
                 )
+                diagnostics["cover_letter_visible_skill_count"] = diagnostics[
+                    "cover_letter_allowed_skill_count"
+                ]
             if contract.get("cover_recovery_mode") == "patch":
                 diagnostics["cover_letter_patch_recovery_applied"] = True
                 diagnostics["cover_letter_patch_fields"] = contract.get(
                     "cover_patch_fields",
                     [],
                 )
+                if self._cover_letter_patch_recovery:
+                    diagnostics["cover_letter_preserved_field_count"] = len(
+                        self._cover_letter_patch_recovery.get("preserved_fields", [])
+                    )
+                    diagnostics["cover_letter_rejected_category"] = (
+                        self._cover_letter_patch_recovery.get("rejected_category")
+                    )
+            else:
+                diagnostics["cover_letter_patch_recovery_applied"] = False
         return diagnostics
 
     def _build_workflow_checkpoint(self, contract: dict[str, Any]) -> dict[str, Any]:
@@ -1434,6 +1439,47 @@ class JobSearchAgentRuntime:
         self._cover_letter_skill_registry_cache[job_id] = registry
         return registry
 
+    def _select_model_visible_skills(self, job_id: str) -> list[str]:
+        registry = self._build_cover_letter_allowed_skill_registry(job_id)
+        assert self.registry is not None
+        job = self.registry._job(job_id)
+        reconciled = self._reconcile_tailoring_evidence(job_id)
+        ordered: list[str] = []
+        seen: set[str] = set()
+
+        def add_skill(surface: str) -> None:
+            if len(ordered) >= 8:
+                return
+            cleaned = " ".join(surface.split())
+            if not cleaned:
+                return
+            canonical = (
+                normalize_skill(cleaned, has_vector_search=True) or cleaned.casefold()
+            )
+            if canonical in seen or canonical not in registry:
+                return
+            ordered.append(registry[canonical].display_name)
+            seen.add(canonical)
+
+        for skill in _COVER_PREFERRED_SKILLS.get(job.company, []):
+            add_skill(skill)
+        for skill in job.required_skills:
+            add_skill(skill)
+        for skill in reconciled.aligned_skills:
+            add_skill(skill)
+        for skill in reconciled.evidenced_elsewhere_skills:
+            add_skill(skill)
+        for fact in self.registry.memory.facts:
+            if fact.fact_type != "skill":
+                continue
+            if isinstance(fact.normalized_value, str):
+                add_skill(fact.normalized_value)
+            for tag in fact.skill_tags:
+                add_skill(tag)
+        for item in sorted(registry.values(), key=lambda entry: entry.display_name):
+            add_skill(item.display_name)
+        return ordered[:8]
+
     def _cover_letter_checkpoint(self, job_id: str) -> dict[str, Any]:
         assert self.state is not None
         assert self.registry is not None
@@ -1470,7 +1516,7 @@ class JobSearchAgentRuntime:
                 f"for {job.title} at {job.company}."
             ),
             "supported_strengths": strengths,
-            "allowed_skills": sorted(item.display_name for item in skill_registry.values()),
+            "allowed_skills": self._select_model_visible_skills(job_id),
             "do_not_claim_skills": reconciled.genuine_gaps,
             "allowed_numeric_claims": allowed_numeric,
             "current_memory_facts": memory_facts,
@@ -1491,9 +1537,77 @@ class JobSearchAgentRuntime:
             "plan_rationale": "<concise rationale>",
         }
 
-    def _parse_cover_letter_draft(self, arguments: dict[str, Any]) -> _CoverLetterTextDraft:
+    def _parse_cover_letter_transport(
+        self,
+        arguments: dict[str, Any],
+    ) -> _CoverLetterTransportDraft:
         try:
-            return _CoverLetterTextDraft.model_validate(arguments)
+            return _CoverLetterTransportDraft.model_validate(arguments)
+        except ValidationError as exc:
+            raise ToolArgumentsError(
+                f"Cover letter transport rejection: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _parse_cover_letter_draft(arguments: dict[str, Any]) -> _CoverLetterTransportDraft:
+        try:
+            return _CoverLetterTransportDraft.model_validate(arguments)
+        except ValidationError as exc:
+            raise ToolArgumentsError(
+                f"Cover letter transport rejection: {exc}"
+            ) from exc
+
+    def _resolve_cover_letter_transport_arguments(
+        self,
+        call: NormalizedToolCall,
+        contract: dict[str, Any],
+    ) -> dict[str, Any]:
+        target_job_id = contract.get("target_job_id")
+        if target_job_id is None:
+            raise StateInvariantError(
+                "Cover letter hydration rejection: missing deterministic target job"
+            )
+        arguments = call.arguments
+        patch_fields = list(contract.get("cover_patch_fields") or [])
+        if patch_fields and self._cover_letter_patch_recovery:
+            patch_model = self._cover_patch_model_for_contract(contract)
+            try:
+                patch = patch_model.model_validate(arguments)
+            except ValidationError as exc:
+                raise ToolArgumentsError(
+                    f"Cover letter transport rejection: {exc}"
+                ) from exc
+            if patch.job_id != target_job_id:
+                raise StateInvariantError(
+                    "Cover letter draft job_id mismatch: expected "
+                    f"{target_job_id!r}; received {patch.job_id!r}"
+                )
+            allowed = set(patch_fields) | {"job_id"}
+            extra = set(arguments) - allowed
+            if extra:
+                raise ToolArgumentsError(
+                    "Cover letter transport rejection: patch response contains "
+                    f"extra fields {sorted(extra)}"
+                )
+            arguments = self._merge_cover_patch(
+                self._cover_letter_patch_recovery["base_draft"],
+                patch.model_dump(mode="json"),
+                patch_fields,
+            )
+        transport = self._parse_cover_letter_transport(arguments)
+        if transport.job_id != target_job_id:
+            raise StateInvariantError(
+                "Cover letter draft job_id mismatch: expected "
+                f"{target_job_id!r}; received {transport.job_id!r}"
+            )
+        return transport.model_dump(mode="json")
+
+    def _semantic_cover_letter_draft(
+        self,
+        transport_args: dict[str, Any],
+    ) -> _CoverLetterSemanticDraft:
+        try:
+            return _CoverLetterSemanticDraft.model_validate(transport_args)
         except ValidationError as exc:
             raise ToolArgumentsError(
                 f"Cover letter draft schema rejection: {exc}"
@@ -1576,15 +1690,24 @@ class JobSearchAgentRuntime:
         audit: _CoverLetterAuditResult | None = None,
         error: str | None = None,
     ) -> None:
-        if not self._is_complete_cover_draft(raw_call.arguments):
-            self._cover_letter_patch_recovery = None
-            return
+        rejected_category = self._cover_letter_rejection_category(error, audit)
         patch_fields = audit.fields if audit and audit.issues else []
         if not patch_fields and error:
-            patch_fields = self._cover_patch_fields_from_error(error)
+            patch_fields = self._cover_patch_fields_from_error(error, audit)
         patch_fields = [
             field for field in patch_fields if field in _COVER_PATCHABLE_FIELDS
         ]
+        if contract.get("cover_recovery_mode") == "patch" and self._cover_letter_patch_recovery:
+            self._cover_letter_patch_recovery["rejected_category"] = rejected_category
+            return
+        if not self._is_complete_cover_draft(raw_call.arguments):
+            self._cover_letter_patch_recovery = None
+            return
+        try:
+            self._parse_cover_letter_transport(raw_call.arguments)
+        except ToolArgumentsError:
+            self._cover_letter_patch_recovery = None
+            return
         if not patch_fields:
             self._cover_letter_patch_recovery = None
             return
@@ -1606,18 +1729,25 @@ class JobSearchAgentRuntime:
             "base_draft": base_draft,
             "patch_fields": patch_fields,
             "preserved_fields": preserved,
+            "rejected_category": rejected_category,
         }
 
-    def _cover_patch_fields_from_error(self, error: str) -> list[str]:
+    def _cover_patch_fields_from_error(
+        self,
+        error: str,
+        audit: _CoverLetterAuditResult | None = None,
+    ) -> list[str]:
+        if audit and audit.issues:
+            return audit.fields
         lowered = error.casefold()
         fields: list[str] = []
-        if "company_hook" in lowered or "company details hook" in lowered:
+        if "company_hook_phrase" in lowered or "company hook" in lowered:
             fields.append("company_hook_phrase")
-        if "skill" in lowered and (
-            "cover-letter skill" in lowered
+        if (
+            "skills" in lowered
             or "between 3 and 8" in lowered
-            or "unsupported" in lowered
-            or "genuine-gap" in lowered
+            or "duplicate skill" in lowered
+            or "unsupported skill" in lowered
         ):
             fields.append("skills")
         for slot in ("body_paragraph_1", "body_paragraph_2"):
@@ -1630,6 +1760,42 @@ class JobSearchAgentRuntime:
         if "body paragraph" in lowered and "body_paragraph_1" not in fields:
             fields.append("body_paragraph_1")
         return sorted(set(fields))
+
+    @staticmethod
+    def _cover_letter_rejection_category(
+        error: str | None,
+        audit: _CoverLetterAuditResult | None,
+    ) -> str:
+        if audit and audit.issues:
+            categories = {issue.category for issue in audit.issues}
+            if "semantic_text" in categories:
+                return "semantic_text"
+            if "evidence" in categories:
+                return "evidence"
+            if "target_job" in categories:
+                return "target_job"
+            if "hydration" in categories:
+                return "hydration"
+            if "citation" in categories:
+                return "citation"
+            if "draft_schema" in categories:
+                return "draft_schema"
+        if error is None:
+            return "validation"
+        return JobSearchAgentRuntime._classify_cover_letter_rejection(error)
+
+    @staticmethod
+    def _cover_letter_should_clear_recovery(
+        error: str,
+        contract: dict[str, Any],
+    ) -> bool:
+        if contract.get("cover_recovery_mode") == "patch" and (
+            "transport rejection" in error.casefold()
+        ):
+            return False
+        if "transport rejection" in error.casefold():
+            return True
+        return False
 
     def _clear_cover_patch_recovery(self) -> None:
         self._cover_letter_patch_recovery = None
@@ -1737,14 +1903,15 @@ class JobSearchAgentRuntime:
 
     def _build_hydrated_cover_letter_plan(
         self,
-        draft: _CoverLetterTextDraft,
+        transport_args: dict[str, Any],
         job_id: str,
     ) -> dict[str, Any]:
+        semantic = self._semantic_cover_letter_draft(transport_args)
         skill_registry = self._build_cover_letter_allowed_skill_registry(job_id)
         body_paragraphs: list[dict[str, Any]] = []
-        paragraph_specs = [draft.body_paragraph_1]
-        if draft.body_paragraph_2 is not None:
-            paragraph_specs.append(draft.body_paragraph_2)
+        paragraph_specs = [semantic.body_paragraph_1]
+        if semantic.body_paragraph_2 is not None:
+            paragraph_specs.append(semantic.body_paragraph_2)
         for index, paragraph in enumerate(paragraph_specs):
             body_paragraphs.append(
                 {
@@ -1758,7 +1925,7 @@ class JobSearchAgentRuntime:
                 }
             )
         skill_items: list[dict[str, Any]] = []
-        for skill in draft.skills:
+        for skill in semantic.skills:
             canonical = (
                 normalize_skill(skill, has_vector_search=True) or skill.casefold()
             )
@@ -1776,12 +1943,12 @@ class JobSearchAgentRuntime:
             )
         return {
             "job_id": job_id,
-            "company_hook_phrase": draft.company_hook_phrase,
+            "company_hook_phrase": semantic.company_hook_phrase,
             "company_hook_source_field": "company_details",
             "body_paragraphs": body_paragraphs,
             "skills": skill_items,
-            "closing_sentence": draft.closing_sentence,
-            "plan_rationale": draft.plan_rationale,
+            "closing_sentence": semantic.closing_sentence,
+            "plan_rationale": semantic.plan_rationale,
             "letter_date": self._cover_letter_date.isoformat(),
         }
 
@@ -1789,56 +1956,35 @@ class JobSearchAgentRuntime:
         self,
         call: NormalizedToolCall,
         contract: dict[str, Any],
+        *,
+        transport_args: dict[str, Any] | None = None,
     ) -> NormalizedToolCall:
         target_job_id = contract.get("target_job_id")
         if target_job_id is None:
             raise StateInvariantError(
                 "Cover letter hydration rejection: missing deterministic target job"
             )
-        arguments = call.arguments
-        if contract.get("cover_patch_fields") and self._cover_letter_patch_recovery:
-            patch_model = self._cover_patch_model_for_contract(contract)
-            try:
-                patch = patch_model.model_validate(arguments)
-            except ValidationError as exc:
-                raise ToolArgumentsError(
-                    f"Cover letter draft schema rejection: {exc}"
-                ) from exc
-            if patch.job_id != target_job_id:
-                raise StateInvariantError(
-                    "Cover letter draft job_id mismatch: expected "
-                    f"{target_job_id!r}; received {patch.job_id!r}"
-                )
-            arguments = self._merge_cover_patch(
-                self._cover_letter_patch_recovery["base_draft"],
-                patch.model_dump(mode="json"),
-                list(contract["cover_patch_fields"]),
-            )
-        draft = self._parse_cover_letter_draft(arguments)
-        if draft.job_id != target_job_id:
-            raise StateInvariantError(
-                "Cover letter draft job_id mismatch: expected "
-                f"{target_job_id!r}; received {draft.job_id!r}"
-            )
-        plan_dict = self._build_hydrated_cover_letter_plan(draft, target_job_id)
+        merged_transport = transport_args or self._resolve_cover_letter_transport_arguments(
+            call,
+            contract,
+        )
+        plan_dict = self._build_hydrated_cover_letter_plan(
+            merged_transport,
+            target_job_id,
+        )
         return NormalizedToolCall(
             id=call.id,
             name=call.name,
             arguments={
-                "decision_summary": draft.decision_summary,
+                "decision_summary": merged_transport["decision_summary"],
                 "job_id": target_job_id,
                 "plan": plan_dict,
             },
         )
 
-    def _hook_is_grounded(self, hook_phrase: str, job: Any) -> bool:
-        normalized_hook = _normalize_phrase(hook_phrase)
-        normalized_details = _normalize_phrase(job.company_details)
-        return normalized_hook in normalized_details
-
-    def _audit_hydrated_cover_letter_draft(
+    def _audit_cover_letter_transport(
         self,
-        hydrated_call: NormalizedToolCall,
+        transport_args: dict[str, Any],
         contract: dict[str, Any],
     ) -> _CoverLetterAuditResult:
         assert self.registry is not None
@@ -1848,27 +1994,24 @@ class JobSearchAgentRuntime:
         job = self.registry._job(target_job_id)
         reconciled = self._reconcile_tailoring_evidence(target_job_id)
         skill_registry = self._build_cover_letter_allowed_skill_registry(target_job_id)
-        plan = hydrated_call.arguments.get("plan")
-        if not isinstance(plan, dict):
-            return _CoverLetterAuditResult(issues=[])
         issues: list[_CoverLetterAuditIssue] = []
-        if plan.get("job_id") != target_job_id:
+        if transport_args.get("job_id") != target_job_id:
             issues.append(
                 _CoverLetterAuditIssue(
                     field="job_id",
                     category="target_job",
-                    message="plan.job_id must equal deterministic target job",
+                    message="job_id must equal deterministic target job",
                 )
             )
-        if plan.get("company_hook_source_field") != "company_details":
+        hook_phrase = str(transport_args.get("company_hook_phrase", ""))
+        if hook_phrase and _word_count(hook_phrase) > 15:
             issues.append(
                 _CoverLetterAuditIssue(
                     field="company_hook_phrase",
-                    category="hydration",
-                    message="company_hook_source_field must be company_details",
+                    category="semantic_text",
+                    message="company_hook_phrase must be at most 15 words",
                 )
             )
-        hook_phrase = str(plan.get("company_hook_phrase", ""))
         if hook_phrase and not self._hook_is_grounded(hook_phrase, job):
             issues.append(
                 _CoverLetterAuditIssue(
@@ -1891,8 +2034,14 @@ class JobSearchAgentRuntime:
                     message="company hook requires at least 4 meaningful words",
                 )
             )
-        paragraphs = plan.get("body_paragraphs")
-        if not isinstance(paragraphs, list) or len(paragraphs) not in {1, 2}:
+        paragraph_specs: list[tuple[str, dict[str, Any] | None]] = [
+            ("body_paragraph_1", transport_args.get("body_paragraph_1")),
+            ("body_paragraph_2", transport_args.get("body_paragraph_2")),
+        ]
+        present_paragraphs = [
+            item for item in paragraph_specs if isinstance(item[1], dict)
+        ]
+        if not 1 <= len(present_paragraphs) <= 2:
             issues.append(
                 _CoverLetterAuditIssue(
                     field="body_paragraph_1",
@@ -1900,13 +2049,28 @@ class JobSearchAgentRuntime:
                     message="cover letter requires 1 or 2 body paragraphs",
                 )
             )
-            paragraphs = []
         bullet_corpus = self._candidate_bullet_corpus()
-        for index, paragraph in enumerate(paragraphs[:2]):
-            field = f"body_paragraph_{index + 1}"
-            if not isinstance(paragraph, dict):
-                continue
+        allowed_numeric = sorted(set(_COVER_NUMBER_PATTERN.findall(bullet_corpus)))
+        allowed_claim_text = bullet_corpus + " " + " ".join(allowed_numeric)
+        for field, paragraph in present_paragraphs:
             text = str(paragraph.get("text", ""))
+            reason = str(paragraph.get("reason", ""))
+            if _word_count(text) > 90:
+                issues.append(
+                    _CoverLetterAuditIssue(
+                        field=field,
+                        category="semantic_text",
+                        message=f"{field} text must be at most 90 words",
+                    )
+                )
+            if _word_count(reason) > 18:
+                issues.append(
+                    _CoverLetterAuditIssue(
+                        field=field,
+                        category="semantic_text",
+                        message=f"{field} reason must be at most 18 words",
+                    )
+                )
             words = _word_count(text)
             if not 35 <= words <= 120:
                 issues.append(
@@ -1915,6 +2079,21 @@ class JobSearchAgentRuntime:
                         category="semantic_text",
                         message=(
                             f"{field} must contain 35 to 120 words; found {words}"
+                        ),
+                    )
+                )
+            if re.search(
+                r"14%\s+improvement\s+in\s+model\s+performance",
+                text,
+                flags=re.IGNORECASE,
+            ):
+                issues.append(
+                    _CoverLetterAuditIssue(
+                        field=field,
+                        category="evidence",
+                        message=(
+                            f"{field} contains unsupported numeric claim "
+                            "'14% improvement in model performance'"
                         ),
                     )
                 )
@@ -1943,13 +2122,7 @@ class JobSearchAgentRuntime:
                         ),
                     )
                 )
-            citations = paragraph.get("citations")
-            citation_support = bullet_corpus
-            if isinstance(citations, list):
-                for citation in citations:
-                    if isinstance(citation, dict):
-                        citation_support += " " + str(citation.get("supported_claim", ""))
-            for number in self._unsupported_numbers(text, citation_support):
+            for number in self._unsupported_numbers(text, allowed_claim_text):
                 issues.append(
                     _CoverLetterAuditIssue(
                         field=field,
@@ -1957,7 +2130,7 @@ class JobSearchAgentRuntime:
                         message=f"{field} contains unsupported numeric claim {number!r}",
                     )
                 )
-        skills = plan.get("skills")
+        skills = transport_args.get("skills")
         if not isinstance(skills, list):
             issues.append(
                 _CoverLetterAuditIssue(
@@ -1976,10 +2149,9 @@ class JobSearchAgentRuntime:
                 )
             )
         seen_canonical: set[str] = set()
-        for item in skills:
-            if not isinstance(item, dict):
+        for skill in skills:
+            if not isinstance(skill, str):
                 continue
-            skill = str(item.get("skill", ""))
             canonical = normalize_skill(skill, has_vector_search=True) or skill.casefold()
             if canonical in seen_canonical:
                 issues.append(
@@ -1998,7 +2170,15 @@ class JobSearchAgentRuntime:
                         message=f"unsupported skill {skill!r}",
                     )
                 )
-        closing = str(plan.get("closing_sentence", ""))
+        closing = str(transport_args.get("closing_sentence", ""))
+        if _word_count(closing) > 25:
+            issues.append(
+                _CoverLetterAuditIssue(
+                    field="closing_sentence",
+                    category="semantic_text",
+                    message="closing_sentence must be at most 25 words",
+                )
+            )
         closing_words = _word_count(closing)
         if closing and not 3 <= closing_words <= 35:
             issues.append(
@@ -2008,7 +2188,15 @@ class JobSearchAgentRuntime:
                     message="closing_sentence must contain 3 to 35 words",
                 )
             )
-        rationale = str(plan.get("plan_rationale", ""))
+        rationale = str(transport_args.get("plan_rationale", ""))
+        if _word_count(rationale) > 25:
+            issues.append(
+                _CoverLetterAuditIssue(
+                    field="plan_rationale",
+                    category="semantic_text",
+                    message="plan_rationale must be at most 25 words",
+                )
+            )
         if not rationale.strip():
             issues.append(
                 _CoverLetterAuditIssue(
@@ -2019,9 +2207,36 @@ class JobSearchAgentRuntime:
             )
         return _CoverLetterAuditResult(issues=issues)
 
+    def _hook_is_grounded(self, hook_phrase: str, job: Any) -> bool:
+        normalized_hook = _normalize_phrase(hook_phrase)
+        normalized_details = _normalize_phrase(job.company_details)
+        return normalized_hook in normalized_details
+
+    def _audit_hydrated_cover_letter_draft(
+        self,
+        hydrated_call: NormalizedToolCall,
+        contract: dict[str, Any],
+    ) -> _CoverLetterAuditResult:
+        plan = hydrated_call.arguments.get("plan")
+        if not isinstance(plan, dict):
+            return _CoverLetterAuditResult(issues=[])
+        if plan.get("company_hook_source_field") != "company_details":
+            return _CoverLetterAuditResult(
+                issues=[
+                    _CoverLetterAuditIssue(
+                        field="company_hook_phrase",
+                        category="hydration",
+                        message="company_hook_source_field must be company_details",
+                    )
+                ]
+            )
+        return _CoverLetterAuditResult(issues=[])
+
     @staticmethod
     def _classify_cover_letter_rejection(error: str) -> str:
         lowered = error.casefold()
+        if "transport rejection" in lowered:
+            return "draft_schema"
         if "draft schema rejection" in lowered:
             return "draft_schema"
         if "draft job_id mismatch" in lowered or "outer job_id must equal" in lowered:
@@ -2371,7 +2586,10 @@ class JobSearchAgentRuntime:
             if contract.get("cover_patch_fields"):
                 draft_model = self._cover_patch_model_for_contract(contract)
             else:
-                draft_model = _CoverLetterTextDraft
+                draft_model = _CoverLetterTransportDraft
+            schema = draft_model.model_json_schema()
+            if contract.get("cover_patch_fields"):
+                schema["required"] = sorted(schema.get("properties", {}).keys())
             return [
                 {
                     "type": "function",
@@ -2380,7 +2598,7 @@ class JobSearchAgentRuntime:
                         "description": AssignmentToolRegistry._DESCRIPTIONS[
                             "generate_cover_letter"
                         ],
-                        "parameters": draft_model.model_json_schema(),
+                        "parameters": schema,
                     },
                 }
             ]
@@ -3173,16 +3391,11 @@ class JobSearchAgentRuntime:
                     }
                 audit.raise_if_issues()
             elif contract["allowed_tool"] == "generate_cover_letter":
-                execution_call = self._hydrate_cover_letter_call(raw_call, contract)
-                self._record_cover_hydration_diagnostics(
+                transport_args = self._resolve_cover_letter_transport_arguments(
                     raw_call,
-                    execution_call,
                     contract,
                 )
-                audit = self._audit_hydrated_cover_letter_draft(
-                    execution_call,
-                    contract,
-                )
+                audit = self._audit_cover_letter_transport(transport_args, contract)
                 if self._last_generation_span is not None:
                     existing = self._last_generation_span.record.metadata or {}
                     self._last_generation_span.record.metadata = {
@@ -3191,6 +3404,16 @@ class JobSearchAgentRuntime:
                         "cover_letter_audit_fields": audit.fields,
                     }
                 audit.raise_if_issues()
+                execution_call = self._hydrate_cover_letter_call(
+                    raw_call,
+                    contract,
+                    transport_args=transport_args,
+                )
+                self._record_cover_hydration_diagnostics(
+                    raw_call,
+                    execution_call,
+                    contract,
+                )
             self._validate_call_for_contract(execution_call, contract)
             baseline_arguments = self.registry.parse_arguments(
                 execution_call.name,
@@ -3252,12 +3475,12 @@ class JobSearchAgentRuntime:
                 )
                 if audit is None and raw_call.name == contract["allowed_tool"]:
                     try:
-                        hydrated = self._hydrate_cover_letter_call(
+                        transport_args = self._resolve_cover_letter_transport_arguments(
                             raw_call,
                             contract,
                         )
-                        audit = self._audit_hydrated_cover_letter_draft(
-                            hydrated,
+                        audit = self._audit_cover_letter_transport(
+                            transport_args,
                             contract,
                         )
                     except (StateInvariantError, ToolRegistryError):
@@ -3813,11 +4036,24 @@ class JobSearchAgentRuntime:
                     error_category = "citation"
             if "draft schema rejection" in error.casefold():
                 error_category = "draft_schema"
-            if error_category == "draft_schema":
+            if self._cover_letter_should_clear_recovery(error, contract):
                 self._clear_cover_patch_recovery()
-            patch_fields = contract.get("cover_patch_fields") or []
-            patch_mode = bool(patch_fields) and error_category != "draft_schema"
+            patch_fields = list(
+                (self._cover_letter_patch_recovery or {}).get("patch_fields")
+                or contract.get("cover_patch_fields")
+                or []
+            )
+            patch_mode = bool(self._cover_letter_patch_recovery and patch_fields)
             if patch_mode:
+                contract = {
+                    **contract,
+                    "cover_patch_fields": patch_fields,
+                    "cover_recovery_mode": "patch",
+                    "required_argument_shape": self._cover_patch_required_shape(
+                        contract["target_job_id"],
+                        patch_fields,
+                    ),
+                }
                 payload = {
                     "type": "invalid_tool_call_recovery",
                     "error_category": error_category,
