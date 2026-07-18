@@ -142,7 +142,14 @@ class OllamaChatModelClient:
         client: ollama.Client | None = None,
     ) -> None:
         self._config = config
-        self._client = client or ollama.Client(host=config.ollama_host)
+        self._client = (
+            client
+            if client is not None
+            else ollama.Client(
+                host=config.ollama_host,
+                timeout=config.ollama_request_timeout_seconds,
+            )
+        )
 
     @property
     def model_name(self) -> str:
@@ -162,14 +169,14 @@ class OllamaChatModelClient:
                 think=False,
                 options={
                     "num_ctx": self._config.ollama_num_ctx,
+                    "num_predict": self._config.ollama_num_predict,
                     "temperature": self._config.ollama_temperature,
                 },
                 keep_alive=self._config.ollama_keep_alive,
             )
         except Exception as exc:
             raise ChatModelTransportError(
-                f"Local Ollama chat request failed for model "
-                f"{self._config.ollama_model!r}: {type(exc).__name__}"
+                f"Local Ollama chat request failed: {type(exc).__name__}"
             ) from exc
         return normalize_assistant_message(response)
 

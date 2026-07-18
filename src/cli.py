@@ -289,6 +289,7 @@ def _run_agent_command(args: argparse.Namespace, config: AppConfig) -> int:
                 config=config,
                 client=client,
                 tracer=tracer,
+                progress_callback=print,
             )
     except KeyboardInterrupt:
         print("\nAgent run interrupted.")

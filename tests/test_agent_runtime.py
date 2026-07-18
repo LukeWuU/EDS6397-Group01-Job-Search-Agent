@@ -9,7 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from src.agent.client import NormalizedAssistantMessage, NormalizedToolCall
+from src.agent.client import (
+    ChatModelTransportError,
+    NormalizedAssistantMessage,
+    NormalizedToolCall,
+)
 from src.agent.runtime import AgentLoopLimitError, JobSearchAgentRuntime
 from src.agent.state import AgentPhase, StateInvariantError
 from src.agent.tool_registry import ToolArgumentsError
@@ -299,13 +303,21 @@ def _responses(
     return responses
 
 
-def _runtime(tmp_path, client, provider, tracer):
+def _runtime(
+    tmp_path,
+    client,
+    provider,
+    tracer,
+    *,
+    config=None,
+    progress_callback=None,
+):
     memory_path = tmp_path / "memory.json"
     shutil.copyfile(ROOT / "memory.json", memory_path)
     return JobSearchAgentRuntime(
         client=client,
         review_decision_provider=provider,
-        config=AppConfig(langfuse_enabled=False),
+        config=config or AppConfig(langfuse_enabled=False),
         jobs_path=ROOT / "data/AI_ML_Jobs_Dataset_20.csv",
         profile_path=ROOT / "candidate/profile.json",
         portfolio_path=ROOT / "candidate/portfolio.json",
@@ -317,6 +329,7 @@ def _runtime(tmp_path, client, provider, tracer):
         final_output_root=tmp_path / "final",
         tracer=tracer,
         run_id="scripted-complete-run",
+        progress_callback=progress_callback,
     )
 
 
@@ -388,7 +401,14 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
         AppConfig(langfuse_enabled=True, langfuse_public_trace=True),
         client=fake_langfuse,
     )
-    runtime = _runtime(tmp_path, client, provider, tracer)
+    progress = []
+    runtime = _runtime(
+        tmp_path,
+        client,
+        provider,
+        tracer,
+        progress_callback=progress.append,
+    )
     result = runtime.run()
 
     assert result.completed is True
@@ -542,6 +562,22 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
         str(path.relative_to(ROOT)) for path in (ROOT / "outputs").rglob("*")
     ) if (ROOT / "outputs").exists() else []
     assert outputs_after == outputs_before
+    assert progress[:3] == [
+        "Agent phase: filtering",
+        "Model call 1/40: waiting for scripted-local-model",
+        "Model call 1: response received",
+    ]
+    assert "Agent phase: fit analysis 1/3" in progress
+    assert "Agent phase: resume tailoring 1/3" in progress
+    assert "Agent phase: cover letter 1/3" in progress
+    safe_progress = "\n".join(progress)
+    for sensitive in (
+        scores[0].job_id,
+        "decision_summary",
+        "candidate evidence",
+        "PRIVATE_SECRET",
+    ):
+        assert sensitive not in safe_progress
 
 
 def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
@@ -782,3 +818,66 @@ def test_three_repeated_invalid_turns_raise_loop_limit(tmp_path):
     assert fake_langfuse.flushes == 1
     assert runtime.trace is not None
     assert runtime.trace.trace_url is None
+
+
+def test_model_transport_failure_flushes_private_trace_without_outputs_or_memory_write(
+    tmp_path,
+):
+    class TransportFailureClient:
+        model_name = "qwen3:8b"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, tools):
+            del messages, tools
+            self.calls += 1
+            raise ChatModelTransportError(
+                "Local Ollama chat request failed: ReadTimeout"
+            )
+
+    source_memory_before = _hash(ROOT / "memory.json")
+    fake_langfuse = FakeLangfuse()
+    config = AppConfig(
+        langfuse_enabled=True,
+        langfuse_public_trace=True,
+    )
+    tracer = LangfuseAgentTracer(config, client=fake_langfuse)
+    client = TransportFailureClient()
+    progress = []
+    runtime = _runtime(
+        tmp_path,
+        client,
+        ReviewProvider("unused"),
+        tracer,
+        config=config,
+        progress_callback=progress.append,
+    )
+    copied_memory_before = _hash(runtime.memory_path)
+
+    result = runtime.run()
+
+    assert result.completed is False
+    assert result.failure_reason == (
+        "ChatModelTransportError: "
+        "Local Ollama chat request failed: ReadTimeout"
+    )
+    assert client.calls == 1
+    assert result.model_call_count == 0
+    assert _hash(runtime.memory_path) == copied_memory_before
+    assert _hash(ROOT / "memory.json") == source_memory_before
+    assert runtime.final_output_root.is_dir()
+    assert not any(runtime.final_output_root.rglob("*"))
+    assert runtime.run_workspace.is_dir()
+    assert not any(runtime.run_workspace.rglob("*"))
+    assert fake_langfuse.root.ended == 1
+    assert fake_langfuse.root.public_calls == 0
+    assert fake_langfuse.trace_url_arguments == []
+    assert fake_langfuse.flushes == 1
+    assert runtime.trace is not None
+    assert runtime.trace.trace_url is None
+    assert runtime.trace.trace_public is False
+    assert progress == [
+        "Agent phase: filtering",
+        "Model call 1/40: waiting for qwen3:8b",
+    ]

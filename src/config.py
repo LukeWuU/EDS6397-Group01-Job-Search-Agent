@@ -15,6 +15,8 @@ class AppConfig(BaseModel):
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "qwen3:8b"
     ollama_num_ctx: int = 8192
+    ollama_num_predict: int = 1024
+    ollama_request_timeout_seconds: float = 600.0
     ollama_temperature: float = 0.0
     ollama_keep_alive: str = "10m"
     langfuse_enabled: bool = False
@@ -34,6 +36,22 @@ class AppConfig(BaseModel):
             raise ValueError("ollama_num_ctx must be a positive integer")
         return value
 
+    @field_validator("ollama_num_predict")
+    @classmethod
+    def validate_positive_generation_limit(cls, value: int) -> int:
+        """Reject non-positive generation limits."""
+        if value <= 0:
+            raise ValueError("ollama_num_predict must be a positive integer")
+        return value
+
+    @field_validator("ollama_request_timeout_seconds")
+    @classmethod
+    def validate_positive_timeout(cls, value: float) -> float:
+        """Reject non-positive production request timeouts."""
+        if value <= 0:
+            raise ValueError("ollama_request_timeout_seconds must be greater than zero")
+        return value
+
     @field_validator("ollama_temperature")
     @classmethod
     def validate_temperature(cls, value: float) -> float:
@@ -47,6 +65,8 @@ _ENV_FIELD_MAP: dict[str, str] = {
     "OLLAMA_HOST": "ollama_host",
     "OLLAMA_MODEL": "ollama_model",
     "OLLAMA_NUM_CTX": "ollama_num_ctx",
+    "OLLAMA_NUM_PREDICT": "ollama_num_predict",
+    "OLLAMA_REQUEST_TIMEOUT_SECONDS": "ollama_request_timeout_seconds",
     "OLLAMA_TEMPERATURE": "ollama_temperature",
     "OLLAMA_KEEP_ALIVE": "ollama_keep_alive",
     "LANGFUSE_ENABLED": "langfuse_enabled",
@@ -72,9 +92,12 @@ def _parse_bool(value: str) -> bool:
 
 def _coerce_env_value(field_name: str, raw_value: str) -> Any:
     """Convert a raw environment string to the typed config value."""
-    if field_name == "ollama_num_ctx":
+    if field_name in {"ollama_num_ctx", "ollama_num_predict"}:
         return int(raw_value)
-    if field_name == "ollama_temperature":
+    if field_name in {
+        "ollama_temperature",
+        "ollama_request_timeout_seconds",
+    }:
         return float(raw_value)
     if field_name in {"langfuse_enabled", "langfuse_public_trace"}:
         return _parse_bool(raw_value)

@@ -6,6 +6,7 @@ import pytest
 
 from src.agent.client import (
     ChatModelResponseError,
+    ChatModelTransportError,
     NormalizedAssistantMessage,
     OllamaChatModelClient,
     normalize_assistant_message,
@@ -77,6 +78,73 @@ def test_ollama_062_arguments_are_explicit_and_no_secret_is_exposed():
     call = fake.calls[0]
     assert call["think"] is False
     assert call["stream"] is False
-    assert call["options"] == {"num_ctx": 4096, "temperature": 0.2}
+    assert call["options"] == {
+        "num_ctx": 4096,
+        "num_predict": 1024,
+        "temperature": 0.2,
+    }
     assert call["keep_alive"] == "3m"
     assert "must-not-leak" not in repr(call)
+
+
+def test_production_client_uses_configured_transport_timeout(monkeypatch):
+    fake = FakeOllama({"message": {"content": "ok", "tool_calls": []}})
+    constructions = []
+
+    def factory(**kwargs):
+        constructions.append(kwargs)
+        return fake
+
+    monkeypatch.setattr("src.agent.client.ollama.Client", factory)
+    config = AppConfig(
+        ollama_host="http://production-local.test",
+        ollama_request_timeout_seconds=321.5,
+    )
+
+    client = OllamaChatModelClient(config)
+    client.chat([{"role": "user", "content": "safe test"}], [])
+
+    assert constructions == [
+        {
+            "host": "http://production-local.test",
+            "timeout": 321.5,
+        }
+    ]
+    assert len(fake.calls) == 1
+
+
+def test_read_timeout_is_wrapped_once_without_sensitive_text():
+    class ReadTimeout(Exception):
+        pass
+
+    class TimingOutOllama:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, **kwargs):
+            self.calls += 1
+            raise ReadTimeout(
+                "prompt=PRIVATE_PROMPT secret=PRIVATE_SECRET arguments=PRIVATE_ARGS"
+            )
+
+    fake = TimingOutOllama()
+    client = OllamaChatModelClient(
+        AppConfig(
+            ollama_model="qwen3:8b",
+            langfuse_secret_key="PRIVATE_SECRET",
+        ),
+        client=fake,
+    )
+
+    with pytest.raises(ChatModelTransportError) as captured:
+        client.chat(
+            [{"role": "user", "content": "PRIVATE_PROMPT"}],
+            [{"function": {"arguments": "PRIVATE_ARGS"}}],
+        )
+
+    assert isinstance(captured.value.__cause__, ReadTimeout)
+    assert str(captured.value) == "Local Ollama chat request failed: ReadTimeout"
+    assert "PRIVATE_PROMPT" not in str(captured.value)
+    assert "PRIVATE_SECRET" not in str(captured.value)
+    assert "PRIVATE_ARGS" not in str(captured.value)
+    assert fake.calls == 1

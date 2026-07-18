@@ -6,6 +6,7 @@ import copy
 import json
 import re
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +91,7 @@ class JobSearchAgentRuntime:
         final_output_root: Path,
         tracer: AgentTracer | None = None,
         run_id: str | None = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> None:
         self.client = client
         self.review_decision_provider = review_decision_provider
@@ -105,6 +107,7 @@ class JobSearchAgentRuntime:
         self.final_output_root = final_output_root.resolve()
         self.tracer = tracer or build_agent_tracer(config)
         self.run_id = run_id or f"run-{uuid.uuid4().hex}"
+        self.progress_callback = progress_callback
 
         self.state: AgentRunState | None = None
         self.registry: AssignmentToolRegistry | None = None
@@ -119,6 +122,32 @@ class JobSearchAgentRuntime:
     @property
     def model_name(self) -> str:
         return str(getattr(self.client, "model_name", self.config.ollama_model))
+
+    def _report_progress(self, message: str) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(message)
+
+    @staticmethod
+    def _phase_progress_message(contract: dict[str, Any]) -> str:
+        phase = contract["phase"]
+        labels = {
+            "filtering": "filtering",
+            "scoring": "scoring",
+            "fit_analysis": "fit analysis",
+            "resume_tailoring": "resume tailoring",
+            "resume_revision": "resume revision",
+            "cover_letter": "cover letter",
+        }
+        message = f"Agent phase: {labels.get(phase, phase.replace('_', ' '))}"
+        rank = contract.get("target_rank")
+        if rank is not None and phase in {
+            "fit_analysis",
+            "resume_tailoring",
+            "resume_revision",
+            "cover_letter",
+        }:
+            message += f" {rank}/3"
+        return message
 
     def _target_rank(self, job_id: str | None) -> int | None:
         assert self.state is not None
@@ -594,6 +623,11 @@ class JobSearchAgentRuntime:
             raise AgentLoopLimitError("Maximum model-call count reached")
         schemas = self.registry.model_schemas([contract["allowed_tool"]])
         call_number = self.state.model_call_count + 1
+        self._report_progress(self._phase_progress_message(contract))
+        self._report_progress(
+            f"Model call {call_number}/{MAX_MODEL_CALLS}: "
+            f"waiting for {self.model_name}"
+        )
         with self.tracer.span(
             parent or self.trace,
             f"chat_model:{call_number}",
@@ -606,13 +640,18 @@ class JobSearchAgentRuntime:
                     "think": False,
                     "stream": False,
                     "num_ctx": self.config.ollama_num_ctx,
+                    "num_predict": self.config.ollama_num_predict,
                     "temperature": self.config.ollama_temperature,
+                    "request_timeout_seconds": (
+                        self.config.ollama_request_timeout_seconds
+                    ),
                 },
             },
             metadata={"model_call_number": call_number},
             observation_type="generation",
         ) as span:
             response = self.client.chat(self.conversation, schemas)
+            self._report_progress(f"Model call {call_number}: response received")
             self.state.model_call_count = call_number
             span.set_output(response.model_dump(mode="json"))
         return response
@@ -1261,6 +1300,7 @@ def run_job_search_agent(
     client: ChatModelClient | None = None,
     tracer: AgentTracer | None = None,
     run_id: str | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> AgentRunResult:
     """Convenience entry point for the one production runtime."""
     resolved_config = config or load_config()
@@ -1280,6 +1320,7 @@ def run_job_search_agent(
         final_output_root=final_output_root,
         tracer=tracer,
         run_id=run_id,
+        progress_callback=progress_callback,
     )
     return runtime.run()
 

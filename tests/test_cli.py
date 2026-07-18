@@ -143,8 +143,10 @@ def test_yes_constructs_each_dependency_once_and_invokes_runtime_once(
         assert kwargs["client"] is objects["client"]
         assert kwargs["tracer"] is objects["tracer"]
         assert kwargs["review_decision_provider"] is objects["provider"]
+        assert kwargs["progress_callback"] is print
         assert cli.runtime_module.MAX_MODEL_CALLS == 12
         assert cli.runtime_module.MAX_TOOL_CALLS == 18
+        kwargs["progress_callback"]("Agent phase: filtering")
         return _result()
 
     monkeypatch.setattr(
@@ -171,6 +173,7 @@ def test_yes_constructs_each_dependency_once_and_invokes_runtime_once(
     assert counts == {"client": 1, "tracer": 1, "provider": 1, "runtime": 1}
     output = capsys.readouterr().out
     assert "[WARNING] Preflight skipped" in output
+    assert "Agent phase: filtering" in output
     assert "Agent run completed" in output
     assert "Human Review pauses: 1" in output
     assert "Trace URL: not available" in output
