@@ -6,7 +6,9 @@ import hashlib
 import json
 import shutil
 import copy
+from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -18,6 +20,7 @@ from src.agent.client import (
 from src.agent.runtime import (
     AgentLoopLimitError,
     JobSearchAgentRuntime,
+    _CoverLetterTextDraft,
     _TailorResumeTextDraftNoSwap,
     _TailorResumeTextDraftWithSwap,
 )
@@ -201,6 +204,36 @@ def _compact_draft_from_plan(
     }
 
 
+def _compact_cover_draft_from_plan(
+    plan,
+    job_id: str,
+    *,
+    decision_summary: str = "Generate cover letter.",
+):
+    def _sanitize_text(text: str) -> str:
+        return text.replace("controlled evaluation", "controlled validation")
+
+    body_paragraph_2 = None
+    if len(plan.body_paragraphs) > 1:
+        body_paragraph_2 = {
+            "text": _sanitize_text(plan.body_paragraphs[1].text),
+            "reason": plan.body_paragraphs[1].reason,
+        }
+    return {
+        "decision_summary": decision_summary,
+        "job_id": job_id,
+        "company_hook_phrase": plan.company_hook_phrase,
+        "body_paragraph_1": {
+            "text": _sanitize_text(plan.body_paragraphs[0].text),
+            "reason": plan.body_paragraphs[0].reason,
+        },
+        "body_paragraph_2": body_paragraph_2,
+        "skills": [item.skill for item in plan.skills],
+        "closing_sentence": plan.closing_sentence,
+        "plan_rationale": plan.plan_rationale,
+    }
+
+
 def _responses(
     scores,
     resume_plans,
@@ -329,13 +362,13 @@ def _responses(
             tool_calls=[
                 _tool(
                     "generate_cover_letter",
-                    {
-                        "job_id": job_id,
-                        "plan": cover_plans[job_id].model_dump(mode="json"),
-                        "decision_summary": (
+                    _compact_cover_draft_from_plan(
+                        cover_plans[job_id],
+                        job_id,
+                        decision_summary=(
                             f"Generate the approved cover letter for {job_id}."
                         ),
-                    },
+                    ),
                     50 + index,
                 )
             ]
@@ -353,6 +386,7 @@ def _runtime(
     *,
     config=None,
     progress_callback=None,
+    cover_letter_date=None,
 ):
     memory_path = tmp_path / "memory.json"
     shutil.copyfile(ROOT / "memory.json", memory_path)
@@ -372,16 +406,18 @@ def _runtime(
         tracer=tracer,
         run_id="scripted-complete-run",
         progress_callback=progress_callback,
+        cover_letter_date=cover_letter_date,
     )
 
 
-def _runtime_at_tailoring(tmp_path):
+def _runtime_at_tailoring(tmp_path, *, cover_letter_date=None):
     tracer = NoOpAgentTracer()
     runtime = _runtime(
         tmp_path,
         ScriptedClient([]),
         ReviewProvider("unused"),
         tracer,
+        cover_letter_date=cover_letter_date,
     )
     runtime.trace = tracer.start_trace("agent_run", run_id=runtime.run_id)
     runtime._load_inputs()
@@ -2224,3 +2260,399 @@ def test_rank3_evaluation_claim_rejected_by_resume_execution_path(
     recovery = json.loads(runtime.conversation[-1]["content"])
     assert recovery["error_category"] == "evidence"
     assert "evaluation" in recovery["error"].casefold()
+
+
+def _runtime_at_cover_letter(tmp_path, *, rank: int = 1, cover_letter_date=None):
+    from types import SimpleNamespace
+
+    from tests.test_cover_letter_tool import _make_finalized
+
+    runtime = _runtime_at_tailoring(tmp_path, cover_letter_date=cover_letter_date)
+    assert runtime.state is not None
+    assert runtime.registry is not None
+    ids = runtime.state.top_3_job_ids
+    for index, job_id in enumerate(ids):
+        job = runtime.registry._job(job_id)
+        runtime.state.finalized_resumes[job_id] = _make_finalized(
+            tmp_path / f"finalized-{index}",
+            job,
+        )
+    runtime.state.human_review = SimpleNamespace(completed=True)
+    runtime.state.cover_letters = {
+        ids[index]: object() for index in range(rank - 1)
+    }
+    runtime.state.phase = AgentPhase.COVER_LETTERS
+    return runtime
+
+
+def _cover_letter_contract(runtime, *, rank: int = 1):
+    contract = runtime._next_action_contract()
+    assert contract["allowed_tool"] == "generate_cover_letter"
+    assert contract["target_rank"] == rank
+    return contract
+
+
+def _valid_compact_cover_call(runtime, *, rank: int = 1):
+    _, scores, _, cover_plans = _workflow_plans()
+    contract = _cover_letter_contract(runtime, rank=rank)
+    job_id = contract["target_job_id"]
+    draft = _compact_cover_draft_from_plan(cover_plans[job_id], job_id)
+    return contract, _tool("generate_cover_letter", draft, rank)
+
+
+def _current_cover_letter_messages(runtime, contract):
+    runtime._apply_conversation_checkpoint(contract)
+    return list(runtime.conversation)
+
+
+def test_cover_letter_compact_schema_forbids_identity_fields():
+    schema = _CoverLetterTextDraft.model_json_schema()
+    properties = set(schema.get("properties", {}))
+    assert "company_hook_source_field" not in properties
+    assert "citations" not in properties
+    assert "letter_date" not in properties
+    assert schema.get("additionalProperties") is False
+    with pytest.raises(Exception):
+        _CoverLetterTextDraft.model_validate(
+            {
+                "decision_summary": "Draft cover letter.",
+                "job_id": "job-1",
+                "company_hook_phrase": "one two three four five",
+                "body_paragraph_1": {
+                    "text": "word " * 40,
+                    "reason": "Evidence-grounded paragraph.",
+                },
+                "skills": ["Python", "RAG", "Docker"],
+                "closing_sentence": "I welcome the opportunity to discuss my fit.",
+                "plan_rationale": "Use only supplied evidence.",
+                "company_hook_source_field": "company",
+            }
+        )
+
+
+def test_cover_letter_compact_schema_rejects_too_many_skills():
+    with pytest.raises(Exception):
+        _CoverLetterTextDraft.model_validate(
+            {
+                "decision_summary": "Draft cover letter.",
+                "job_id": "job-1",
+                "company_hook_phrase": "one two three four five",
+                "body_paragraph_1": {
+                    "text": "word " * 40,
+                    "reason": "Evidence-grounded paragraph.",
+                },
+                "skills": [f"Skill-{index}" for index in range(10)],
+                "closing_sentence": "I welcome the opportunity to discuss my fit.",
+                "plan_rationale": "Use only supplied evidence.",
+            }
+        )
+
+
+def test_cover_letter_hydration_injects_company_details_field(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    hydrated = runtime._hydrate_cover_letter_call(call, contract)
+    plan = hydrated.arguments["plan"]
+    assert plan["company_hook_source_field"] == "company_details"
+    assert "citations" not in call.arguments
+    assert "company_hook_source_field" not in call.arguments
+
+
+def test_call11_regression_cannot_emit_company_source_field(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    polluted = copy.deepcopy(call.arguments)
+    polluted["company_hook_source_field"] = "company"
+    with pytest.raises(Exception):
+        _CoverLetterTextDraft.model_validate(polluted)
+
+
+def test_cover_letter_hydration_is_deterministic(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    hydrated1 = runtime._hydrate_cover_letter_call(call, contract)
+    hydrated2 = runtime._hydrate_cover_letter_call(call, contract)
+    assert hydrated1.arguments == hydrated2.arguments
+
+
+def test_cover_letter_hook_repair_preserves_valid_skills(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    base_skills = list(call.arguments["skills"])
+    bad_hook_call = _tool(
+        "generate_cover_letter",
+        {
+            **call.arguments,
+            "company_hook_phrase": "totally ungrounded marketing phrase here now",
+        },
+        2,
+    )
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[bad_hook_call]),
+        contract,
+    )
+    assert runtime._cover_letter_patch_recovery is not None
+    preserved = runtime._cover_letter_patch_recovery["base_draft"]
+    assert preserved["skills"] == base_skills
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    patch_contract = {
+        **contract,
+        "cover_patch_fields": recovery["patch_fields"],
+        "cover_recovery_mode": "patch",
+        "required_argument_shape": recovery["required_argument_shape"],
+    }
+    assert patch_contract["cover_patch_fields"] == ["company_hook_phrase"]
+    patch_call = _tool(
+        "generate_cover_letter",
+        {
+            "job_id": contract["target_job_id"],
+            "company_hook_phrase": call.arguments["company_hook_phrase"],
+        },
+        3,
+    )
+    hydrated = runtime._hydrate_cover_letter_call(patch_call, patch_contract)
+    assert hydrated.arguments["plan"]["skills"] == runtime._hydrate_cover_letter_call(
+        call,
+        contract,
+    ).arguments["plan"]["skills"]
+
+
+def test_cover_letter_skill_repair_preserves_valid_hook(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    base_hook = call.arguments["company_hook_phrase"]
+    bad_skills_call = _tool(
+        "generate_cover_letter",
+        {
+            **call.arguments,
+            "skills": [f"Skill-{index}" for index in range(10)],
+        },
+        2,
+    )
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[bad_skills_call]),
+        contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["error_category"] == "draft_schema"
+    assert runtime._cover_letter_patch_recovery is None
+    polluted = copy.deepcopy(call.arguments)
+    polluted["skills"] = ["Python", "RAG", "Evaluation", "Docker"]
+    runtime.state.model_call_count = 2
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("generate_cover_letter", polluted, 3)]),
+        contract,
+    )
+    assert runtime._cover_letter_patch_recovery is not None
+    assert (
+        runtime._cover_letter_patch_recovery["base_draft"]["company_hook_phrase"]
+        == base_hook
+    )
+
+
+def test_cover_letter_audit_collects_multiple_issues(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path, rank=2)
+    contract, call = _valid_compact_cover_call(runtime, rank=2)
+    polluted = copy.deepcopy(call.arguments)
+    polluted["company_hook_phrase"] = "invented marketing phrase without grounding"
+    polluted["body_paragraph_1"] = {
+        **polluted["body_paragraph_1"],
+        "text": (
+            polluted["body_paragraph_1"]["text"]
+            + " I also claim evaluation expertise throughout."
+        ),
+    }
+    hydrated = runtime._hydrate_cover_letter_call(
+        _tool("generate_cover_letter", polluted, 1),
+        contract,
+    )
+    audit = runtime._audit_hydrated_cover_letter_draft(hydrated, contract)
+    fields = audit.fields
+    assert "company_hook_phrase" in fields
+    assert "body_paragraph_1" in fields
+    assert len(audit.issues) >= 2
+
+
+def test_cover_letter_valid_fixture_passes_audit(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    hydrated = runtime._hydrate_cover_letter_call(call, contract)
+    audit = runtime._audit_hydrated_cover_letter_draft(hydrated, contract)
+    audit.raise_if_issues()
+
+
+def test_cover_letter_payloads_under_limit_without_identity_fields(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    ids = runtime.state.top_3_job_ids
+    sizes: list[int] = []
+    for rank in range(1, 4):
+        runtime.state.cover_letters = {
+            ids[index]: object() for index in range(rank - 1)
+        }
+        contract = runtime._next_action_contract()
+        messages = _current_cover_letter_messages(runtime, contract)
+        serialized = json.dumps(messages, separators=(",", ":"))
+        sizes.append(len(serialized))
+        checkpoint = json.loads(messages[1]["content"])
+        shape = json.dumps(checkpoint["next_action_contract"]["required_argument_shape"])
+        schemas = json.dumps(runtime._model_schemas_for_contract(contract))
+        assert '"source_type"' not in shape
+        assert '"evidence_id"' not in shape
+        assert "company_hook_source_field" not in shape
+        assert "company_hook_source_field" not in schemas
+        assert '"source_type"' not in schemas
+    assert max(sizes) < 8731
+
+
+def test_cover_letter_patch_payload_smaller_than_initial(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    initial_checkpoint = json.loads(
+        _current_cover_letter_messages(runtime, contract)[1]["content"]
+    )
+    initial_size = len(json.dumps(initial_checkpoint, separators=(",", ":")))
+    bad_call = _tool(
+        "generate_cover_letter",
+        {
+            **call.arguments,
+            "company_hook_phrase": "invented marketing phrase without grounding",
+        },
+        2,
+    )
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[bad_call]),
+        contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    patch_size = len(json.dumps(recovery, separators=(",", ":")))
+    assert patch_size < initial_size
+    assert len(runtime.conversation) == 3
+
+
+def test_hydrated_cover_letter_executes_existing_tool_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
+    )
+    runtime = _runtime_at_cover_letter(tmp_path)
+    tracer = NoOpAgentTracer()
+    runtime.trace = tracer.start_trace("agent_run", run_id=runtime.run_id)
+    contract, call = _valid_compact_cover_call(runtime)
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[call]),
+        contract,
+    )
+    assert valid == 1
+    assert invalid == 0
+    tool_span = next(
+        item
+        for item in runtime.trace.record.observations
+        if item.name == "tool_call:generate_cover_letter"
+    )
+    assert "plan" in tool_span.input["arguments"]
+    assert (
+        tool_span.input["arguments"]["plan"]["company_hook_source_field"]
+        == "company_details"
+    )
+
+
+def test_cover_letter_model_schema_uses_compact_draft(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    schemas = runtime._model_schemas_for_contract(contract)
+    assert schemas[0]["function"]["name"] == "generate_cover_letter"
+    assert "CoverLetterPlan" not in json.dumps(schemas)
+    assert "company_hook_phrase" in json.dumps(schemas)
+    assert "letter_date" not in json.dumps(schemas)
+
+
+def test_runtime_captures_cover_letter_date_once(tmp_path):
+    fixed = date(2026, 7, 17)
+    runtime = _runtime_at_cover_letter(tmp_path, cover_letter_date=fixed)
+    assert runtime._cover_letter_date == fixed
+
+
+def test_hydrate_cover_letter_does_not_call_date_today(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path, cover_letter_date=date(2026, 7, 17))
+    contract, call = _valid_compact_cover_call(runtime)
+    with patch("src.agent.runtime.date") as mock_date:
+        mock_date.today.side_effect = AssertionError(
+            "date.today must not be called during cover-letter hydration"
+        )
+        hydrated = runtime._hydrate_cover_letter_call(call, contract)
+    mock_date.today.assert_not_called()
+    assert hydrated.arguments["plan"]["letter_date"] == "2026-07-17"
+
+
+def test_cover_letter_hydration_reuses_fixed_run_date(tmp_path):
+    fixed = date(2026, 3, 4)
+    runtime = _runtime_at_cover_letter(tmp_path, cover_letter_date=fixed)
+    contract, call = _valid_compact_cover_call(runtime)
+    hydrated1 = runtime._hydrate_cover_letter_call(call, contract)
+    hydrated2 = runtime._hydrate_cover_letter_call(call, contract)
+    assert hydrated1.arguments == hydrated2.arguments
+    assert hydrated1.arguments["plan"]["letter_date"] == "2026-03-04"
+
+
+def test_cover_letter_patch_hydration_reuses_same_letter_date(tmp_path):
+    fixed = date(2026, 5, 9)
+    runtime = _runtime_at_cover_letter(tmp_path, cover_letter_date=fixed)
+    contract, call = _valid_compact_cover_call(runtime)
+    initial = runtime._hydrate_cover_letter_call(call, contract)
+    bad_call = _tool(
+        "generate_cover_letter",
+        {
+            **call.arguments,
+            "company_hook_phrase": "invented marketing phrase without grounding",
+        },
+        2,
+    )
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[bad_call]),
+        contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    patch_contract = {
+        **contract,
+        "cover_patch_fields": recovery["patch_fields"],
+        "cover_recovery_mode": "patch",
+        "required_argument_shape": recovery["required_argument_shape"],
+    }
+    patch_call = _tool(
+        "generate_cover_letter",
+        {
+            "job_id": contract["target_job_id"],
+            "company_hook_phrase": call.arguments["company_hook_phrase"],
+        },
+        3,
+    )
+    patched = runtime._hydrate_cover_letter_call(patch_call, patch_contract)
+    assert patched.arguments["plan"]["letter_date"] == initial.arguments["plan"]["letter_date"]
+    assert patched.arguments["plan"]["letter_date"] == "2026-05-09"
+    assert "letter_date" not in json.dumps(recovery)
+
+
+def test_all_top3_cover_letters_share_one_letter_date(tmp_path):
+    fixed = date(2026, 11, 21)
+    runtime = _runtime_at_cover_letter(tmp_path, cover_letter_date=fixed)
+    _, scores, _, cover_plans = _workflow_plans()
+    ids = runtime.state.top_3_job_ids
+    dates: list[str] = []
+    for rank in range(1, 4):
+        runtime.state.cover_letters = {
+            ids[index]: object() for index in range(rank - 1)
+        }
+        contract = runtime._next_action_contract()
+        assert contract["target_rank"] == rank
+        job_id = contract["target_job_id"]
+        draft = _compact_cover_draft_from_plan(cover_plans[job_id], job_id)
+        hydrated = runtime._hydrate_cover_letter_call(
+            _tool("generate_cover_letter", draft, rank),
+            contract,
+        )
+        dates.append(hydrated.arguments["plan"]["letter_date"])
+    assert dates == ["2026-11-21", "2026-11-21", "2026-11-21"]
+    date.fromisoformat(dates[0])

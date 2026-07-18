@@ -208,6 +208,25 @@ COVER_LETTER_PLAN_LIMITS = [
     "Return exactly one tool call with no prose outside the tool call.",
 ]
 
+COVER_LETTER_NORMAL_CONSTRAINTS = [
+    "Return exactly one generate_cover_letter tool call with semantic text fields only.",
+    "job_id must equal TARGET_JOB_ID.",
+    "Write company_hook_phrase only; Python sets company_hook_source_field.",
+    "Provide body_paragraph_1 and optional body_paragraph_2 with text and reason only.",
+    "Select 3 to 8 unique skills from target_context.allowed_skills only.",
+    "Do not claim skills listed in target_context.do_not_claim_skills.",
+    "Ground company_hook_phrase in target_context.company_details_excerpt.",
+    "Use approved memory facts from target_context.current_memory_facts when relevant.",
+    "Python injects citations, evidence IDs, source fields, letter_date, and nested plan.",
+    "Never author citation objects, source IDs, source fields, or evidence IDs.",
+    (
+        "company_hook_phrase: at most 15 words; each body paragraph text: at most 90 "
+        "words; each reason: at most 18 words; closing_sentence: at most 25 words; "
+        "plan_rationale: at most 25 words."
+    ),
+    "No prose outside the tool call.",
+]
+
 __all__ = [
     "SYSTEM_PROMPT",
     "TAILOR_RESUME_ARGUMENT_TEMPLATE",
@@ -215,4 +234,5 @@ __all__ = [
     "TAILOR_RESUME_CONSTRAINTS",
     "TAILOR_RESUME_PLAN_LIMITS",
     "COVER_LETTER_PLAN_LIMITS",
+    "COVER_LETTER_NORMAL_CONSTRAINTS",
 ]
