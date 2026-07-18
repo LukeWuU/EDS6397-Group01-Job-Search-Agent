@@ -37,6 +37,7 @@ from src.agent.tool_registry import (
     ToolRegistryError,
 )
 from src.config import AppConfig, load_config
+from src.models.candidate import CandidateProfile, ExperienceBullet
 from src.models.memory import CandidateMemory
 from src.observability.tracing import (
     AgentTracer,
@@ -59,6 +60,32 @@ from src.workflow.human_review import (
 MAX_MODEL_CALLS = 40
 MAX_TOOL_CALLS = 60
 MAX_CONSECUTIVE_INVALID_TURNS = 3
+
+_TAILOR_DEFAULT_JOB_CITATION_FIELD = "required_skills_raw"
+_TAILOR_RECOMMENDED_JOB_SOURCE_FIELDS = (
+    "required_skills_raw",
+    "job_description",
+    "title",
+    "experience_requirement_raw",
+)
+_TAILOR_INVALID_JOB_SOURCE_FIELDS = (
+    "aligned_skills",
+    "job_posting",
+    "requirements",
+    "skills",
+)
+_TAILOR_CANDIDATE_SUMMARY_FIELD = "experience"
+_CITATION_ERROR_MARKERS = (
+    "unknown job citation field",
+    "unknown candidate profile source id",
+    "unknown candidate profile field",
+    "unknown experience bullet id",
+    "unknown experience bullet field",
+    "actual evidence id",
+    "requires its bullet citation",
+    "requires job-posting",
+    "citation",
+)
 
 
 class AgentRuntimeError(Exception):
@@ -229,6 +256,118 @@ class JobSearchAgentRuntime:
         if length_limited:
             self._report_progress("Model completion: length limit")
 
+    def _report_citation_rejection_progress(self) -> None:
+        assert self.state is not None
+        self._report_progress(
+            f"Model call {self.state.model_call_count}: "
+            "tool call rejected by validation"
+        )
+        self._report_progress("Validation category: citation")
+
+    @staticmethod
+    def _is_citation_error(error: str) -> bool:
+        lowered = error.casefold()
+        return any(marker in lowered for marker in _CITATION_ERROR_MARKERS)
+
+    def _editable_tailoring_bullets(self) -> list[ExperienceBullet]:
+        assert self.registry is not None
+        profile = self.registry.bundle.profile
+        bullets: list[ExperienceBullet] = []
+        for experience in profile.experience:
+            if not experience.is_primary_role:
+                continue
+            for bullet in experience.bullets:
+                if bullet.editable_for_job_tailoring:
+                    bullets.append(bullet)
+        return bullets
+
+    @staticmethod
+    def _bullet_evidence_id(bullet: ExperienceBullet) -> str | None:
+        if not bullet.evidence_ids:
+            return None
+        return bullet.evidence_ids[0]
+
+    def _job_posting_citation(
+        self,
+        job_id: str,
+        *,
+        source_field: str = _TAILOR_DEFAULT_JOB_CITATION_FIELD,
+    ) -> dict[str, Any]:
+        return {
+            "source_type": "job_posting",
+            "source_id": job_id,
+            "source_field": source_field,
+            "evidence_id": None,
+        }
+
+    def _candidate_profile_citation(
+        self,
+        *,
+        source_field: str = _TAILOR_CANDIDATE_SUMMARY_FIELD,
+    ) -> dict[str, Any]:
+        assert self.registry is not None
+        return {
+            "source_type": "candidate_profile",
+            "source_id": self.registry.bundle.profile.candidate_id,
+            "source_field": source_field,
+            "evidence_id": None,
+        }
+
+    def _experience_bullet_citation(self, bullet: ExperienceBullet) -> dict[str, Any]:
+        return {
+            "source_type": "experience_bullet",
+            "source_id": bullet.bullet_id,
+            "source_field": "text",
+            "evidence_id": self._bullet_evidence_id(bullet),
+        }
+
+    def _build_citation_contract(self, job_id: str) -> dict[str, Any]:
+        job_citation = self._job_posting_citation(job_id)
+        candidate_citation = self._candidate_profile_citation()
+        bullet_required_citations: dict[str, list[dict[str, Any]]] = {}
+        for bullet in self._editable_tailoring_bullets()[:2]:
+            bullet_required_citations[bullet.bullet_id] = [
+                self._experience_bullet_citation(bullet),
+                copy.deepcopy(job_citation),
+            ]
+        return {
+            "valid_job_source_fields": list(_TAILOR_RECOMMENDED_JOB_SOURCE_FIELDS),
+            "invalid_job_source_fields": list(_TAILOR_INVALID_JOB_SOURCE_FIELDS),
+            "valid_candidate_profile_source_fields": sorted(
+                CandidateProfile.model_fields
+            ),
+            "default_job_citation": job_citation,
+            "summary_required_citations": [
+                copy.deepcopy(job_citation),
+                copy.deepcopy(candidate_citation),
+            ],
+            "bullet_required_citations": bullet_required_citations,
+            "copy_identity_fields_exactly": [
+                "source_type",
+                "source_id",
+                "source_field",
+                "evidence_id",
+            ],
+            "instructions": [
+                "Copy source_type, source_id, source_field, and evidence_id exactly.",
+                "You may add supported_claim, but must not alter identity fields.",
+                "Never convert source types into source fields.",
+                "Never use an evidence ID as candidate_profile source_id.",
+            ],
+        }
+
+    def _build_citation_recovery_contract(self, job_id: str) -> dict[str, Any]:
+        contract = self._build_citation_contract(job_id)
+        return {
+            "valid_job_source_fields": contract["valid_job_source_fields"],
+            "invalid_job_source_fields": contract["invalid_job_source_fields"],
+            "default_job_citation": contract["default_job_citation"],
+            "summary_required_citations": contract["summary_required_citations"],
+            "bullet_required_citations": contract["bullet_required_citations"],
+            "copy_identity_fields_exactly": contract["copy_identity_fields_exactly"],
+            "instruction": contract["instructions"],
+        }
+
     @property
     def model_name(self) -> str:
         return str(getattr(self.client, "model_name", self.config.ollama_model))
@@ -318,17 +457,22 @@ class JobSearchAgentRuntime:
         analysis = self.state.fit_analyses[job_id]
         job = self.registry._job(job_id)
         profile = self.registry.bundle.profile
-        editable_bullets = [
-            {
-                "bullet_id": bullet.bullet_id,
-                "text": bullet.text,
-                "evidence_ids": list(bullet.evidence_ids),
-            }
-            for experience in profile.experience
-            if experience.is_primary_role
-            for bullet in experience.bullets
-            if bullet.editable_for_job_tailoring
-        ]
+        editable_bullets = []
+        citation_contract = self._build_citation_contract(job_id)
+        for bullet in self._editable_tailoring_bullets():
+            editable_bullets.append(
+                {
+                    "bullet_id": bullet.bullet_id,
+                    "text": bullet.text,
+                    "evidence_ids": list(bullet.evidence_ids),
+                    "required_citations": citation_contract[
+                        "bullet_required_citations"
+                    ].get(
+                        bullet.bullet_id,
+                        [],
+                    ),
+                }
+            )
         relevant_skills = [
             *analysis.core_skills.aligned_skills,
             *analysis.core_skills.evidenced_elsewhere_skills,
@@ -382,6 +526,56 @@ class JobSearchAgentRuntime:
                 for fact in self.registry.memory.facts
             ],
             "revision_feedback": revision_feedback,
+            "citation_contract": citation_contract,
+        }
+
+    def _tailor_required_shape(
+        self,
+        target_job_id: str,
+        *,
+        expected_swap,
+        citation_contract: dict[str, Any],
+    ) -> dict[str, Any]:
+        summary_citations = copy.deepcopy(
+            citation_contract["summary_required_citations"]
+        )
+        bullet_citations = citation_contract["bullet_required_citations"]
+        editable_bullets = self._editable_tailoring_bullets()[:2]
+        project_swap: dict[str, Any] | None = None
+        if expected_swap is not None:
+            project_swap = {
+                "remove_project_id": expected_swap.remove_project_id,
+                "add_project_id": expected_swap.add_project_id,
+                "reason": "<reason>",
+                "citations": [
+                    copy.deepcopy(citation_contract["default_job_citation"]),
+                ],
+            }
+        return {
+            "decision_summary": "<concise explanation>",
+            "job_id": target_job_id,
+            "edit_plan": {
+                "job_id": target_job_id,
+                "professional_summary": {
+                    "new_text": "<tailored summary>",
+                    "reason": "<reason>",
+                    "citations": summary_citations,
+                },
+                "experience_bullet_edits": [
+                    {
+                        "bullet_id": bullet.bullet_id,
+                        "new_text": "<tailored bullet text>",
+                        "reason": "<reason>",
+                        "citations": copy.deepcopy(
+                            bullet_citations[bullet.bullet_id]
+                        ),
+                    }
+                    for bullet in editable_bullets
+                ],
+                "skill_section_edits": [],
+                "project_swap": project_swap,
+                "plan_rationale": "<concise rationale>",
+            },
         }
 
     def _cover_letter_context(self, job_id: str) -> dict[str, Any]:
@@ -412,36 +606,6 @@ class JobSearchAgentRuntime:
                 for fact in self.registry.memory.facts
             ],
             "relevant_evidence_ids": self._evidence_ids(analysis),
-        }
-
-    @staticmethod
-    def _concise_tailor_required_shape(
-        target_job_id: str,
-        *,
-        expected_swap,
-    ) -> dict[str, Any]:
-        project_swap: dict[str, Any] | None = None
-        if expected_swap is not None:
-            project_swap = {
-                "remove_project_id": expected_swap.remove_project_id,
-                "add_project_id": expected_swap.add_project_id,
-                "reason": "<reason>",
-                "citations": ["<target-specific citations>"],
-            }
-        return {
-            "decision_summary": "<concise explanation>",
-            "job_id": target_job_id,
-            "edit_plan": {
-                "job_id": target_job_id,
-                "professional_summary": "<SummaryEdit with citations>",
-                "experience_bullet_edits": [
-                    "<ExperienceBulletEdit>",
-                    "<different ExperienceBulletEdit>",
-                ],
-                "skill_section_edits": [],
-                "project_swap": project_swap,
-                "plan_rationale": "<concise rationale>",
-            },
         }
 
     def _next_action_contract(
@@ -533,18 +697,19 @@ class JobSearchAgentRuntime:
             assert target_job_id is not None
             analysis = state.fit_analyses[target_job_id]
             expected_swap = analysis.projects.swap_suggestion
-            required_shape = self._concise_tailor_required_shape(
+            target_context = self._tailoring_context(
+                target_job_id,
+                revision_feedback=revision_feedback,
+            )
+            required_shape = self._tailor_required_shape(
                 target_job_id,
                 expected_swap=expected_swap,
+                citation_contract=target_context["citation_contract"],
             )
             constraints = [
                 item.replace("TARGET_JOB_ID", target_job_id)
                 for item in TAILOR_RESUME_CONSTRAINTS
             ] + list(TAILOR_RESUME_PLAN_LIMITS)
-            target_context = self._tailoring_context(
-                target_job_id,
-                revision_feedback=revision_feedback,
-            )
         else:
             assert target_job_id is not None
             required_shape = {
@@ -859,8 +1024,11 @@ class JobSearchAgentRuntime:
             )
             self._execute_model_tool_call(call)
         except (StateInvariantError, ToolRegistryError) as exc:
-            self._record_invalid(tool_call=call, error=str(exc))
-            self._append_invalid_message(call, str(exc), contract)
+            error = str(exc)
+            if self._is_citation_error(error):
+                self._report_citation_rejection_progress()
+            self._record_invalid(tool_call=call, error=error)
+            self._append_invalid_message(call, error, contract)
             return 0, 1
         return 1, 0
 
@@ -1132,6 +1300,18 @@ class JobSearchAgentRuntime:
                 template["job_id"] = target_job_id
                 template["edit_plan"]["job_id"] = target_job_id
             payload["exact_tailor_resume_structural_template"] = template
+        target_job_id = contract.get("target_job_id")
+        if (
+            contract["allowed_tool"] == "tailor_resume"
+            and target_job_id
+            and self._is_citation_error(error)
+        ):
+            payload["citation_recovery_contract"] = (
+                self._build_citation_recovery_contract(target_job_id)
+            )
+            payload["instruction"].append(
+                "Copy every supplied citation identity field exactly."
+            )
         self.conversation.append(
             {
                 "role": "tool" if tool_call else "user",
@@ -1350,8 +1530,11 @@ class JobSearchAgentRuntime:
                         trace_parent=trace_parent,
                     )
                 except (StateInvariantError, ToolRegistryError) as exc:
-                    self._record_invalid(tool_call=call, error=str(exc))
-                    self._append_invalid_message(call, str(exc), contract)
+                    error = str(exc)
+                    if self._is_citation_error(error):
+                        self._report_citation_rejection_progress()
+                    self._record_invalid(tool_call=call, error=error)
+                    self._append_invalid_message(call, error, contract)
                     invalid_turns += 1
                 else:
                     self.state.consecutive_invalid_call_count = 0

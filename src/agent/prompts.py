@@ -92,8 +92,32 @@ TAILOR_RESUME_CONSTRAINTS = [
         "requires candidate-side evidence."
     ),
     (
-        "The professional summary must include at least one job_posting citation "
-        "and at least one candidate-side citation."
+        "The professional summary must include the exact supplied job_posting "
+        "citation and the exact supplied candidate-side citation."
+    ),
+    (
+        "Each experience_bullet_edits entry must include its exact "
+        "experience_bullet citation and the exact target job_posting citation."
+    ),
+    (
+        "Each experience_bullet citation must include that bullet's real "
+        "evidence_id from citation_contract."
+    ),
+    (
+        "For candidate_profile citations, source_id must equal the candidate ID "
+        "and source_field must be a CandidateProfile top-level field."
+    ),
+    (
+        "For job_posting citations, source_field must be a Job model field; "
+        "never use aligned_skills, job_posting, requirements, or skills."
+    ),
+    (
+        "Copy supplied citation identity fields exactly: source_type, source_id, "
+        "source_field, and evidence_id. You may add supported_claim only."
+    ),
+    (
+        "Never convert source types into source fields and never use an evidence "
+        "ID as candidate_profile source_id."
     ),
     (
         "Candidate-side sources are experience, experience_bullet, "
@@ -101,6 +125,11 @@ TAILOR_RESUME_CONSTRAINTS = [
         "candidate_profile, or resume_tex."
     ),
     "Do not leave citations empty in the actual submitted summary or bullet edits.",
+    (
+        "Each edited bullet new_text must differ from the current bullet text, "
+        "preserve every supported metric and factual claim, and must not add "
+        "unsupported technologies or capabilities."
+    ),
     "Never present a genuine-gap skill as a candidate qualification.",
     (
         "Never invent patient data, interfaces, production deployment, metrics, "
@@ -116,13 +145,14 @@ TAILOR_RESUME_PLAN_LIMITS = [
     "each reason: at most 18 words",
     "plan_rationale: at most 25 words",
     "Exactly two different experience_bullet_edits are required.",
-    "Use the minimum sufficient citations.",
+    "Use the exact supplied citations; do not invent citation identity fields.",
     (
-        "Summary must include one job_posting citation and at least one "
-        "candidate-side citation."
+        "Summary citations must copy the exact supplied job_posting and "
+        "candidate-side citation objects."
     ),
     (
-        "Each edited bullet must include at least one candidate-side citation."
+        "Each bullet edit citations must copy the exact supplied bullet and "
+        "job_posting citation objects."
     ),
     "skill_section_edits must be [] when no valid edit is needed.",
     "Return exactly one tool call with no prose outside the tool call.",

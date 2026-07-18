@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import copy
 from pathlib import Path
 
 import pytest
@@ -529,9 +530,9 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     assert "exact_tailor_resume_structural_template" not in json.dumps(
         tailoring_checkpoint
     )
-    assert len(json.dumps(first_tailoring_messages)) < len(
-        json.dumps(client.calls[4]["messages"])
-    )
+    assert "citation_contract" in first_tailoring_context
+    assert "citation_contract" in tailoring_checkpoint["target_context"]
+    assert len(first_tailoring_messages) == 2
     assert set(runtime.state.fit_analyses) == {score.job_id for score in scores}
     assert runtime.registry is not None
     assert len(runtime.registry.model_schemas()) == 5
@@ -621,8 +622,9 @@ def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
     assert "at most 32 words" in plan_limits
     assert "Exactly two different experience_bullet_edits" in plan_limits
     safety_contract = " ".join(first_contract["constraints"])
-    assert "job_posting citation supports relevance only" in safety_contract
-    assert "candidate-side evidence" in safety_contract
+    assert "exact supplied job_posting" in safety_contract
+    assert "exact supplied candidate-side citation" in safety_contract
+    assert "Copy supplied citation identity fields exactly" in safety_contract
     assert "genuine-gap skill" in safety_contract
     assert "Never invent patient data" in safety_contract
     assert "Protected resume regions" in safety_contract
@@ -908,7 +910,7 @@ def test_tailoring_compaction_keeps_target_context_and_drops_obsolete_history(
     runtime = _runtime_at_tailoring(tmp_path)
     assert runtime.state is not None
     ids = runtime.state.top_3_job_ids
-    for index in range(6):
+    for index in range(8):
         runtime.conversation.append(
             {
                 "role": "user",
@@ -916,7 +918,7 @@ def test_tailoring_compaction_keeps_target_context_and_drops_obsolete_history(
                     {
                         "type": "current_state",
                         "state": runtime.state.snapshot(),
-                        "obsolete": "x" * 4000,
+                        "obsolete": "x" * 8000,
                     }
                 ),
             }
@@ -1032,3 +1034,197 @@ def test_cover_letter_contract_includes_concise_limits(tmp_path):
     assert "at most 90 words" in limits
     assert "at most 15 words" in limits
     assert contract["target_context"]["approved_resume_revision"] == 0
+
+
+def _tailoring_contract(runtime):
+    contract = runtime._next_action_contract()
+    assert contract["allowed_tool"] == "tailor_resume"
+    return contract
+
+
+def _bad_tailor_call(runtime, *, bad_job_field: str, citation_index: int = 0):
+    contract = _tailoring_contract(runtime)
+    assert runtime.registry is not None
+    assert runtime.state is not None
+    job_id = contract["target_job_id"]
+    job = runtime.registry._job(job_id)
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        runtime.registry.bundle,
+    ).model_dump(mode="json")
+    plan["professional_summary"]["citations"][citation_index][
+        "source_field"
+    ] = bad_job_field
+    call = _tool(
+        "tailor_resume",
+        {
+            "decision_summary": "Submit a draft with an invalid job citation field.",
+            "job_id": job_id,
+            "edit_plan": plan,
+        },
+        1,
+    )
+    return contract, call
+
+
+def _contract_citation_tailor_call(runtime):
+    contract = _tailoring_contract(runtime)
+    assert runtime.registry is not None
+    assert runtime.state is not None
+    job_id = contract["target_job_id"]
+    job = runtime.registry._job(job_id)
+    shape = contract["required_argument_shape"]
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        runtime.registry.bundle,
+    ).model_dump(mode="json")
+    plan["professional_summary"]["citations"] = copy.deepcopy(
+        shape["edit_plan"]["professional_summary"]["citations"]
+    )
+    for index, edit in enumerate(plan["experience_bullet_edits"]):
+        edit["citations"] = copy.deepcopy(
+            shape["edit_plan"]["experience_bullet_edits"][index]["citations"]
+        )
+    return contract, _tool(
+        "tailor_resume",
+        {
+            "decision_summary": "Create the first deterministic draft.",
+            "job_id": job_id,
+            "edit_plan": plan,
+        },
+        1,
+    )
+
+
+def test_tailoring_citation_contract_is_exact_and_target_specific(tmp_path):
+    from src.models.candidate import CandidateProfile
+    from src.models.job import Job
+
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.registry is not None
+    contract = _tailoring_contract(runtime)
+    job_id = contract["target_job_id"]
+    candidate_id = runtime.registry.bundle.profile.candidate_id
+    citation_contract = contract["target_context"]["citation_contract"]
+    shape = contract["required_argument_shape"]
+
+    default_job = citation_contract["default_job_citation"]
+    assert default_job == {
+        "source_type": "job_posting",
+        "source_id": job_id,
+        "source_field": "required_skills_raw",
+        "evidence_id": None,
+    }
+    assert "aligned_skills" in citation_contract["invalid_job_source_fields"]
+    assert "job_posting" in citation_contract["invalid_job_source_fields"]
+
+    summary_citations = citation_contract["summary_required_citations"]
+    assert summary_citations[0]["source_type"] == "job_posting"
+    assert summary_citations[0]["source_id"] == job_id
+    assert summary_citations[0]["source_field"] in Job.model_fields
+    assert summary_citations[1] == {
+        "source_type": "candidate_profile",
+        "source_id": candidate_id,
+        "source_field": "experience",
+        "evidence_id": None,
+    }
+    assert summary_citations[1]["source_field"] in CandidateProfile.model_fields
+
+    bullet_citations = citation_contract["bullet_required_citations"]
+    bullet_one = bullet_citations["exp-primary-bullet-1"]
+    assert bullet_one[0] == {
+        "source_type": "experience_bullet",
+        "source_id": "exp-primary-bullet-1",
+        "source_field": "text",
+        "evidence_id": "EV-EXP-BULLET-001",
+    }
+    assert bullet_one[1] == default_job
+    bullet_two = bullet_citations["exp-primary-bullet-2"]
+    assert bullet_two[0]["source_id"] == "exp-primary-bullet-2"
+    assert bullet_two[0]["evidence_id"] == "EV-EXP-BULLET-002"
+    assert bullet_two[1] == default_job
+
+    assert shape["edit_plan"]["professional_summary"]["citations"] == summary_citations
+    assert len(shape["edit_plan"]["experience_bullet_edits"]) == 2
+    assert (
+        shape["edit_plan"]["experience_bullet_edits"][0]["citations"]
+        == bullet_one
+    )
+    assert (
+        shape["edit_plan"]["experience_bullet_edits"][1]["citations"]
+        == bullet_two
+    )
+
+
+def test_invalid_job_citation_fields_are_rejected_with_recovery(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    progress: list[str] = []
+    runtime.progress_callback = progress.append
+    runtime.state.model_call_count = 6
+
+    for bad_field in ("aligned_skills", "job_posting"):
+        contract, call = _bad_tailor_call(runtime, bad_job_field=bad_field)
+        response = NormalizedAssistantMessage(tool_calls=[call])
+        valid, invalid = runtime._execute_response_calls(response, contract)
+        assert valid == 0
+        assert invalid == 1
+        recovery = json.loads(runtime.conversation[-1]["content"])
+        assert recovery["status"] == "invalid_tool_call"
+        assert "Unknown job citation field" in recovery["error"]
+        assert "citation_recovery_contract" in recovery
+        recovery_contract = recovery["citation_recovery_contract"]
+        assert (
+            recovery_contract["default_job_citation"]["source_field"]
+            == "required_skills_raw"
+        )
+        assert "aligned_skills" in recovery_contract["invalid_job_source_fields"]
+        assert "job_posting" in recovery_contract["invalid_job_source_fields"]
+        assert "exact_tailor_resume_structural_template" not in recovery
+        assert bad_field not in recovery_contract["valid_job_source_fields"]
+        other_ids = [
+            item
+            for item in runtime.state.top_3_job_ids
+            if item != contract["target_job_id"]
+        ]
+        serialized = json.dumps(recovery)
+        assert all(other_id not in serialized for other_id in other_ids)
+
+    assert "Model call 6: tool call rejected by validation" in progress
+    assert "Validation category: citation" in progress
+    assert "aligned_skills" not in progress
+    assert "EV-EXP-BULLET-001" not in progress
+
+
+def test_citation_recovery_omits_structural_template_for_citation_only_errors(
+    tmp_path,
+):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract, call = _bad_tailor_call(runtime, bad_job_field="job_posting")
+    runtime._append_invalid_message(
+        call,
+        "Unknown job citation field 'job_posting'",
+        contract,
+    )
+    payload = json.loads(runtime.conversation[-1]["content"])
+    assert "citation_recovery_contract" in payload
+    assert "exact_tailor_resume_structural_template" not in payload
+
+
+def test_tailor_with_supplied_exact_citations_executes(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
+    )
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.state is not None
+    contract, call = _contract_citation_tailor_call(runtime)
+    response = NormalizedAssistantMessage(tool_calls=[call])
+    valid, invalid = runtime._execute_response_calls(response, contract)
+    assert valid == 1
+    assert invalid == 0
+    assert len(runtime.state.draft_resumes) == 1
+    assert runtime.state.draft_resumes[contract["target_job_id"]] is not None
+    assert len(
+        contract["required_argument_shape"]["edit_plan"]["experience_bullet_edits"]
+    ) == 2
