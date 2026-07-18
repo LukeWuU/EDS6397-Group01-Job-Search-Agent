@@ -45,6 +45,7 @@ from src.tools.cover_letter import (
     CoverLetterParagraph,
     CoverLetterPlan,
     CoverLetterSkillItem,
+    _MEANINGLESS_HOOK_WORDS,
     _normalize_phrase,
     _skill_is_job_relevant,
 )
@@ -221,6 +222,74 @@ _COVER_MEANINGFUL_HOOK_WORDS = {
 _COVER_NUMBER_PATTERN = re.compile(r"(?<!\w)\d+(?:\.\d+)?%?(?!\w)")
 _COVER_WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?")
 
+_COVER_HOOK_MISSION_TERMS = frozenset(
+    {
+        "advance",
+        "build",
+        "create",
+        "deliver",
+        "develop",
+        "drive",
+        "enable",
+        "help",
+        "improve",
+        "innovate",
+        "lead",
+        "leverage",
+        "offer",
+        "partner",
+        "power",
+        "provide",
+        "serve",
+        "support",
+        "transform",
+    }
+)
+_COVER_HOOK_IMPACT_TERMS = frozenset(
+    {
+        "ai",
+        "analytics",
+        "commercial",
+        "customer",
+        "customers",
+        "data",
+        "federal",
+        "impact",
+        "innovation",
+        "mission",
+        "ml",
+        "platform",
+        "product",
+        "products",
+        "service",
+        "services",
+        "solution",
+        "solutions",
+        "technology",
+    }
+)
+_COVER_HOOK_GENERIC_FILLER = frozenset(
+    {
+        "company",
+        "corporation",
+        "enterprise",
+        "firm",
+        "global",
+        "group",
+        "inc",
+        "industries",
+        "leader",
+        "leading",
+        "llc",
+        "nation",
+        "organization",
+        "provider",
+        "services",
+    }
+)
+_COVER_HOOK_MAX_OPTIONS = 6
+_COVER_HOOK_MIN_OPTIONS = 1
+
 _COVER_CITATION_ERROR_MARKERS = (
     "unknown job citation field",
     "unknown candidate profile source id",
@@ -272,7 +341,6 @@ class _CoverLetterTransportDraft(BaseModel):
 
     @field_validator(
         "decision_summary",
-        "company_hook_phrase",
         "closing_sentence",
         "plan_rationale",
     )
@@ -281,6 +349,14 @@ class _CoverLetterTransportDraft(BaseModel):
         value = " ".join(value.split())
         if not value:
             raise ValueError("required string fields must be nonempty")
+        return value
+
+    @field_validator("company_hook_phrase")
+    @classmethod
+    def strip_hook_exact(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("company_hook_phrase must be nonempty")
         return value
 
     @field_validator("skills")
@@ -468,6 +544,10 @@ class JobSearchAgentRuntime:
         self._cover_letter_skill_registry_cache: dict[
             str, dict[str, _AllowedCoverSkill]
         ] = {}
+        self._cover_letter_hook_cache: dict[str, tuple[list[str], bool]] = {}
+        self._cover_letter_schema_model_cache: dict[tuple[Any, ...], type[BaseModel]] = (
+            {}
+        )
         self._cover_letter_date = cover_letter_date or date.today()
 
     @staticmethod
@@ -487,6 +567,8 @@ class JobSearchAgentRuntime:
                 "tailor_recovery_mode",
                 "cover_patch_fields",
                 "cover_recovery_mode",
+                "allowed_company_hooks",
+                "cover_letter_hook_extraction_fallback_used",
                 "reconciliation_metadata",
             }
         }
@@ -550,6 +632,14 @@ class JobSearchAgentRuntime:
                 diagnostics["cover_letter_visible_skill_count"] = diagnostics[
                     "cover_letter_allowed_skill_count"
                 ]
+                allowed_hooks = contract.get("allowed_company_hooks")
+                if allowed_hooks is None:
+                    allowed_hooks = self._select_allowed_company_hooks(target_job_id)
+                diagnostics["cover_letter_allowed_hook_count"] = len(allowed_hooks)
+                diagnostics["cover_letter_hook_enum_applied"] = bool(allowed_hooks)
+                diagnostics["cover_letter_hook_extraction_fallback_used"] = (
+                    contract.get("cover_letter_hook_extraction_fallback_used", False)
+                )
             if contract.get("cover_recovery_mode") == "patch":
                 diagnostics["cover_letter_patch_recovery_applied"] = True
                 diagnostics["cover_letter_patch_fields"] = contract.get(
@@ -1395,6 +1485,300 @@ class JobSearchAgentRuntime:
     def _default_company_hook_phrase(job: Any) -> str:
         return " ".join(job.company_details.split()[:12]).rstrip(".,;:")
 
+    @staticmethod
+    def _word_spans(text: str) -> list[tuple[str, int, int]]:
+        return [
+            (match.group(0), match.start(), match.end())
+            for match in _COVER_WORD_PATTERN.finditer(text)
+        ]
+
+    @staticmethod
+    def _phrase_from_word_span(
+        text: str,
+        spans: list[tuple[str, int, int]],
+        start_index: int,
+        end_index: int,
+    ) -> str:
+        return text[spans[start_index][1] : spans[end_index][2]].strip()
+
+    @staticmethod
+    def _hook_meaningful_word_count(phrase: str) -> int:
+        words = _COVER_WORD_PATTERN.findall(phrase)
+        return sum(
+            1 for word in words if word.casefold() not in _MEANINGLESS_HOOK_WORDS
+        )
+
+    @classmethod
+    def _hook_is_generic_only(cls, phrase: str, company: str) -> bool:
+        words = _COVER_WORD_PATTERN.findall(phrase)
+        meaningful = [
+            word
+            for word in words
+            if word.casefold() not in _MEANINGLESS_HOOK_WORDS
+        ]
+        if len(meaningful) < 4:
+            return True
+        company_tokens = {
+            token.casefold()
+            for token in _COVER_WORD_PATTERN.findall(company)
+            if len(token) > 2
+        }
+        substantive = [
+            word
+            for word in meaningful
+            if word.casefold() not in company_tokens
+            and word.casefold() not in _COVER_HOOK_GENERIC_FILLER
+        ]
+        return len(substantive) < 2
+
+    @classmethod
+    def _is_valid_company_hook_candidate(
+        cls,
+        phrase: str,
+        company_details: str,
+        company: str,
+    ) -> bool:
+        candidate = phrase.strip()
+        if not candidate or candidate != phrase.strip():
+            return False
+        if candidate not in company_details:
+            return False
+        normalized = _normalize_phrase(candidate)
+        if normalized not in _normalize_phrase(company_details):
+            return False
+        words = _COVER_WORD_PATTERN.findall(candidate)
+        if not 4 <= len(words) <= 15:
+            return False
+        if cls._hook_meaningful_word_count(candidate) < 4:
+            return False
+        if cls._hook_is_generic_only(candidate, company):
+            return False
+        return True
+
+    @classmethod
+    def _rank_company_hook_candidate(cls, phrase: str, company: str) -> tuple[int, int, int, int]:
+        words = [word.casefold() for word in _COVER_WORD_PATTERN.findall(phrase)]
+        company_tokens = {
+            token.casefold()
+            for token in _COVER_WORD_PATTERN.findall(company)
+            if len(token) > 2
+        }
+        has_company_subject = int(
+            any(token in phrase.casefold() for token in company_tokens if token)
+        )
+        mission_hits = sum(1 for word in words if word in _COVER_HOOK_MISSION_TERMS)
+        impact_hits = sum(1 for word in words if word in _COVER_HOOK_IMPACT_TERMS)
+        filler_hits = sum(1 for word in words if word in _MEANINGLESS_HOOK_WORDS)
+        newline_penalty = int("\n" in phrase)
+        return (
+            has_company_subject,
+            mission_hits + impact_hits,
+            -filler_hits,
+            -newline_penalty,
+        )
+
+    @staticmethod
+    def _sentence_hook_fragments(text: str) -> list[tuple[str, int]]:
+        fragments: list[tuple[str, int]] = []
+        for match in re.finditer(r"[^.!?]+(?:[.!?]|$)", text):
+            fragment = match.group(0).strip()
+            if fragment:
+                fragments.append((fragment, match.start()))
+        if not fragments and text.strip():
+            fragments.append((text.strip(), 0))
+        return fragments
+
+    @classmethod
+    def _clause_hook_fragments(
+        cls,
+        fragment: str,
+        base_position: int,
+    ) -> list[tuple[str, int]]:
+        fragments: list[tuple[str, int]] = [(fragment, base_position)]
+        delimiter = re.compile(r"\s*;\s*|\s*:\s*|\s+—\s+|\s+–\s+")
+        search_start = 0
+        for part in delimiter.split(fragment):
+            part = part.strip()
+            if not part:
+                continue
+            position = base_position + fragment.find(part, search_start)
+            if position >= base_position:
+                fragments.append((part, position))
+            search_start = max(search_start, fragment.find(part, search_start) + len(part))
+        return fragments
+
+    def _extract_allowed_company_hooks(self, job: Any) -> tuple[list[str], bool]:
+        details = job.company_details
+        ranked: dict[str, tuple[tuple[int, int, int], int, str]] = {}
+        fallback_used = False
+
+        def consider(phrase: str, position: int) -> None:
+            if not self._is_valid_company_hook_candidate(
+                phrase,
+                details,
+                job.company,
+            ):
+                return
+            rank = self._rank_company_hook_candidate(phrase, job.company)
+            normalized = _normalize_phrase(phrase)
+            existing = ranked.get(normalized)
+            if existing is None or (rank, -position) > (existing[0], -existing[1]):
+                ranked[normalized] = (rank, position, phrase)
+
+        for sentence, sentence_pos in self._sentence_hook_fragments(details):
+            consider(sentence, sentence_pos)
+            for clause, clause_pos in self._clause_hook_fragments(sentence, sentence_pos):
+                consider(clause, clause_pos)
+            for line in sentence.splitlines():
+                line = line.strip()
+                if line:
+                    line_pos = sentence_pos + sentence.find(line)
+                    consider(line, line_pos)
+                    for clause, clause_pos in self._clause_hook_fragments(line, line_pos):
+                        consider(clause, clause_pos)
+
+        spans = self._word_spans(details)
+        for start in range(len(spans)):
+            for length in range(4, 16):
+                end = start + length - 1
+                if end >= len(spans):
+                    break
+                consider(
+                    self._phrase_from_word_span(details, spans, start, end),
+                    spans[start][1],
+                )
+
+        ordered = sorted(
+            ranked.values(),
+            key=lambda item: (
+                -item[0][0],
+                -item[0][1],
+                -item[0][2],
+                -item[0][3],
+                item[1],
+                item[2],
+            ),
+        )
+        hooks = [item[2] for item in ordered[:_COVER_HOOK_MAX_OPTIONS]]
+        if hooks:
+            return hooks, fallback_used
+
+        if len(spans) >= 4:
+            fallback_length = min(max(8, 4), len(spans), 15)
+            fallback = self._phrase_from_word_span(
+                details,
+                spans,
+                0,
+                fallback_length - 1,
+            )
+            if self._is_valid_company_hook_candidate(
+                fallback,
+                details,
+                job.company,
+            ):
+                return [fallback], True
+        return [], False
+
+    def _select_allowed_company_hooks(self, job_id: str) -> list[str]:
+        if job_id in self._cover_letter_hook_cache:
+            return list(self._cover_letter_hook_cache[job_id][0])
+        assert self.registry is not None
+        job = self.registry._job(job_id)
+        hooks, fallback_used = self._extract_allowed_company_hooks(job)
+        self._cover_letter_hook_cache[job_id] = (list(hooks), fallback_used)
+        return list(hooks)
+
+    def _ensure_allowed_company_hooks_for_job(self, job_id: str) -> tuple[list[str], bool]:
+        hooks, fallback_used = self._cover_letter_hook_cache.get(job_id, ([], False))
+        if not hooks:
+            assert self.registry is not None
+            job = self.registry._job(job_id)
+            hooks, fallback_used = self._extract_allowed_company_hooks(job)
+            self._cover_letter_hook_cache[job_id] = (list(hooks), fallback_used)
+        if not hooks:
+            raise StateInvariantError(
+                "Cover letter hydration rejection: no allowed company hooks "
+                "could be extracted from company_details"
+            )
+        if not _COVER_HOOK_MIN_OPTIONS <= len(hooks) <= _COVER_HOOK_MAX_OPTIONS:
+            raise StateInvariantError(
+                "Cover letter hydration rejection: allowed company hook count "
+                f"out of bounds: {len(hooks)}"
+            )
+        return list(hooks), fallback_used
+
+    @staticmethod
+    def _apply_cover_hook_enum_to_schema(
+        schema: dict[str, Any],
+        allowed_hooks: list[str],
+    ) -> dict[str, Any]:
+        properties = schema.get("properties", {})
+        hook_property = properties.get("company_hook_phrase")
+        if isinstance(hook_property, dict) and allowed_hooks:
+            hook_property["enum"] = list(allowed_hooks)
+        return schema
+
+    def _cover_letter_schema_model_for_contract(
+        self,
+        contract: dict[str, Any],
+    ) -> type[BaseModel]:
+        allowed_hooks = tuple(contract.get("allowed_company_hooks") or ())
+        patch_fields = tuple(contract.get("cover_patch_fields") or ())
+        cache_key = (allowed_hooks, patch_fields)
+        cached = self._cover_letter_schema_model_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        if patch_fields:
+            field_defs: dict[str, Any] = {"job_id": (str, Field(min_length=1))}
+            if "company_hook_phrase" in patch_fields:
+                field_defs["company_hook_phrase"] = (
+                    str,
+                    Field(
+                        min_length=1,
+                        json_schema_extra={"enum": list(allowed_hooks)},
+                    ),
+                )
+            if "body_paragraph_1" in patch_fields:
+                field_defs["body_paragraph_1"] = (_CoverLetterBodyParagraph, ...)
+            if "body_paragraph_2" in patch_fields:
+                field_defs["body_paragraph_2"] = (_CoverLetterBodyParagraph | None, ...)
+            if "skills" in patch_fields:
+                field_defs["skills"] = (list[str], Field(min_length=3, max_length=8))
+            if "closing_sentence" in patch_fields:
+                field_defs["closing_sentence"] = (str, Field(min_length=1))
+            if "plan_rationale" in patch_fields:
+                field_defs["plan_rationale"] = (str, Field(min_length=1, max_length=200))
+
+            model = create_model(
+                "_CoverLetterPatchDraft",
+                __config__=ConfigDict(extra="forbid"),
+                **field_defs,
+            )
+            self._cover_letter_schema_model_cache[cache_key] = model
+            return model
+
+        model = create_model(
+            "_CoverLetterTransportDraftEnum",
+            __config__=ConfigDict(extra="forbid"),
+            decision_summary=(str, Field(min_length=1)),
+            job_id=(str, Field(min_length=1)),
+            company_hook_phrase=(
+                str,
+                Field(
+                    min_length=1,
+                    json_schema_extra={"enum": list(allowed_hooks)},
+                ),
+            ),
+            body_paragraph_1=(_CoverLetterBodyParagraph, ...),
+            body_paragraph_2=(_CoverLetterBodyParagraph | None, None),
+            skills=(list[str], Field(min_length=1)),
+            closing_sentence=(str, Field(min_length=1)),
+            plan_rationale=(str, Field(min_length=1)),
+        )
+        self._cover_letter_schema_model_cache[cache_key] = model
+        return model
+
     def _build_cover_letter_allowed_skill_registry(
         self,
         job_id: str,
@@ -1504,12 +1888,13 @@ class JobSearchAgentRuntime:
                 *reconciled.evidenced_elsewhere_skills,
             }
         )
+        allowed_hooks, fallback_used = self._ensure_allowed_company_hooks_for_job(job_id)
         return {
             "target_job_id": job_id,
             "rank": self._target_rank(job_id),
             "title": job.title,
             "company": job.company,
-            "company_details_excerpt": self._concise_company_details(job),
+            "allowed_company_hooks": allowed_hooks,
             "approved_resume_revision": finalized.approved_revision_round,
             "finalized_resume_summary": (
                 f"Approved revision {finalized.approved_revision_round} resume "
@@ -1525,11 +1910,19 @@ class JobSearchAgentRuntime:
         }
 
     @staticmethod
-    def _cover_draft_required_shape(target_job_id: str) -> dict[str, Any]:
+    def _cover_draft_required_shape(
+        target_job_id: str,
+        allowed_hooks: list[str] | None = None,
+    ) -> dict[str, Any]:
+        hook_shape = (
+            allowed_hooks[0]
+            if allowed_hooks
+            else "<exact allowed_company_hooks option>"
+        )
         return {
             "decision_summary": "<concise explanation>",
             "job_id": target_job_id,
-            "company_hook_phrase": "<evidence-grounded hook>",
+            "company_hook_phrase": hook_shape,
             "body_paragraph_1": {"text": "<paragraph 1>", "reason": "<reason>"},
             "body_paragraph_2": None,
             "skills": ["<3 to 8 allowed skills>"],
@@ -1537,8 +1930,19 @@ class JobSearchAgentRuntime:
             "plan_rationale": "<concise rationale>",
         }
 
-    def _parse_cover_letter_transport(
-        self,
+    @staticmethod
+    def _validate_cover_hook_enum(
+        hook_phrase: str,
+        allowed_hooks: list[str],
+    ) -> None:
+        if hook_phrase not in set(allowed_hooks):
+            raise ToolArgumentsError(
+                "Cover letter transport rejection: company_hook_phrase must be "
+                "one of allowed_company_hooks"
+            )
+
+    @staticmethod
+    def _parse_cover_letter_transport_structure(
         arguments: dict[str, Any],
     ) -> _CoverLetterTransportDraft:
         try:
@@ -1548,14 +1952,43 @@ class JobSearchAgentRuntime:
                 f"Cover letter transport rejection: {exc}"
             ) from exc
 
-    @staticmethod
-    def _parse_cover_letter_draft(arguments: dict[str, Any]) -> _CoverLetterTransportDraft:
+    def _parse_cover_letter_transport(
+        self,
+        arguments: dict[str, Any],
+        contract: dict[str, Any],
+    ) -> _CoverLetterTransportDraft:
+        allowed_hooks = list(contract.get("allowed_company_hooks") or [])
+        if not allowed_hooks:
+            target_job_id = contract.get("target_job_id")
+            if target_job_id:
+                allowed_hooks = self._select_allowed_company_hooks(target_job_id)
+        if "company_hook_phrase" in arguments and allowed_hooks:
+            self._validate_cover_hook_enum(
+                str(arguments["company_hook_phrase"]),
+                allowed_hooks,
+            )
+        full_contract = {**contract, "cover_patch_fields": []}
+        draft_model = self._cover_letter_schema_model_for_contract(full_contract)
         try:
-            return _CoverLetterTransportDraft.model_validate(arguments)
+            validated = draft_model.model_validate(arguments)
         except ValidationError as exc:
             raise ToolArgumentsError(
                 f"Cover letter transport rejection: {exc}"
             ) from exc
+        return _CoverLetterTransportDraft.model_validate(
+            validated.model_dump(mode="json")
+        )
+
+    @staticmethod
+    def _parse_cover_letter_draft(
+        arguments: dict[str, Any],
+        contract: dict[str, Any] | None = None,
+    ) -> _CoverLetterTransportDraft:
+        if contract is None:
+            return JobSearchAgentRuntime._parse_cover_letter_transport_structure(
+                arguments
+            )
+        raise NotImplementedError("Use _parse_cover_letter_transport with contract")
 
     def _resolve_cover_letter_transport_arguments(
         self,
@@ -1570,13 +2003,21 @@ class JobSearchAgentRuntime:
         arguments = call.arguments
         patch_fields = list(contract.get("cover_patch_fields") or [])
         if patch_fields and self._cover_letter_patch_recovery:
-            patch_model = self._cover_patch_model_for_contract(contract)
+            patch_model = self._cover_letter_schema_model_for_contract(contract)
             try:
                 patch = patch_model.model_validate(arguments)
             except ValidationError as exc:
                 raise ToolArgumentsError(
                     f"Cover letter transport rejection: {exc}"
                 ) from exc
+            if (
+                "company_hook_phrase" in patch_fields
+                and contract.get("allowed_company_hooks")
+            ):
+                self._validate_cover_hook_enum(
+                    str(getattr(patch, "company_hook_phrase", "")),
+                    list(contract["allowed_company_hooks"]),
+                )
             if patch.job_id != target_job_id:
                 raise StateInvariantError(
                     "Cover letter draft job_id mismatch: expected "
@@ -1594,7 +2035,7 @@ class JobSearchAgentRuntime:
                 patch.model_dump(mode="json"),
                 patch_fields,
             )
-        transport = self._parse_cover_letter_transport(arguments)
+        transport = self._parse_cover_letter_transport(arguments, contract)
         if transport.job_id != target_job_id:
             raise StateInvariantError(
                 "Cover letter draft job_id mismatch: expected "
@@ -1638,38 +2079,20 @@ class JobSearchAgentRuntime:
                 merged[field] = copy.deepcopy(patch[field])
         return merged
 
-    def _cover_patch_model_for_contract(
-        self,
-        contract: dict[str, Any],
-    ) -> type[BaseModel]:
-        patch_fields = list(contract.get("cover_patch_fields") or [])
-        field_defs: dict[str, Any] = {"job_id": (str, Field(min_length=1))}
-        if "company_hook_phrase" in patch_fields:
-            field_defs["company_hook_phrase"] = (str, Field(min_length=1))
-        if "body_paragraph_1" in patch_fields:
-            field_defs["body_paragraph_1"] = (_CoverLetterBodyParagraph, ...)
-        if "body_paragraph_2" in patch_fields:
-            field_defs["body_paragraph_2"] = (_CoverLetterBodyParagraph | None, ...)
-        if "skills" in patch_fields:
-            field_defs["skills"] = (list[str], Field(min_length=3, max_length=8))
-        if "closing_sentence" in patch_fields:
-            field_defs["closing_sentence"] = (str, Field(min_length=1))
-        if "plan_rationale" in patch_fields:
-            field_defs["plan_rationale"] = (str, Field(min_length=1, max_length=200))
-        return create_model(
-            "_CoverLetterPatchDraft",
-            __config__=ConfigDict(extra="forbid"),
-            **field_defs,
-        )
-
-    @staticmethod
     def _cover_patch_required_shape(
+        self,
         target_job_id: str,
         patch_fields: list[str],
+        *,
+        allowed_hooks: list[str] | None = None,
     ) -> dict[str, Any]:
         shape: dict[str, Any] = {"job_id": target_job_id}
         if "company_hook_phrase" in patch_fields:
-            shape["company_hook_phrase"] = "<revised hook>"
+            shape["company_hook_phrase"] = (
+                allowed_hooks[0]
+                if allowed_hooks
+                else "<exact allowed_company_hooks option>"
+            )
         if "body_paragraph_1" in patch_fields:
             shape["body_paragraph_1"] = {"text": "<paragraph 1>", "reason": "<reason>"}
         if "body_paragraph_2" in patch_fields:
@@ -1704,7 +2127,7 @@ class JobSearchAgentRuntime:
             self._cover_letter_patch_recovery = None
             return
         try:
-            self._parse_cover_letter_transport(raw_call.arguments)
+            self._parse_cover_letter_transport_structure(raw_call.arguments)
         except ToolArgumentsError:
             self._cover_letter_patch_recovery = None
             return
@@ -2314,6 +2737,20 @@ class JobSearchAgentRuntime:
             "phase": contract["phase"],
             "target_rank": contract.get("target_rank"),
         }
+        allowed_hooks = list(contract.get("allowed_company_hooks") or [])
+        if target_job_id and not allowed_hooks:
+            allowed_hooks = self._select_allowed_company_hooks(target_job_id)
+        diagnostics["cover_letter_allowed_hook_count"] = len(allowed_hooks)
+        diagnostics["cover_letter_hook_enum_applied"] = bool(allowed_hooks)
+        diagnostics["cover_letter_hook_extraction_fallback_used"] = contract.get(
+            "cover_letter_hook_extraction_fallback_used",
+            False,
+        )
+        selected_hook = raw_call.arguments.get("company_hook_phrase")
+        if isinstance(selected_hook, str) and selected_hook in allowed_hooks:
+            diagnostics["cover_letter_selected_hook_index"] = allowed_hooks.index(
+                selected_hook
+            )
         if self._last_generation_span is not None:
             existing = self._last_generation_span.record.metadata or {}
             self._last_generation_span.record.metadata = {**existing, **diagnostics}
@@ -2583,11 +3020,20 @@ class JobSearchAgentRuntime:
                 }
             ]
         if allowed_tool == "generate_cover_letter":
-            if contract.get("cover_patch_fields"):
-                draft_model = self._cover_patch_model_for_contract(contract)
-            else:
-                draft_model = _CoverLetterTransportDraft
+            target_job_id = contract.get("target_job_id")
+            allowed_hooks = list(contract.get("allowed_company_hooks") or [])
+            if target_job_id and not allowed_hooks:
+                allowed_hooks, fallback_used = self._ensure_allowed_company_hooks_for_job(
+                    target_job_id
+                )
+                contract = {
+                    **contract,
+                    "allowed_company_hooks": allowed_hooks,
+                    "cover_letter_hook_extraction_fallback_used": fallback_used,
+                }
+            draft_model = self._cover_letter_schema_model_for_contract(contract)
             schema = draft_model.model_json_schema()
+            schema = self._apply_cover_hook_enum_to_schema(schema, allowed_hooks)
             if contract.get("cover_patch_fields"):
                 schema["required"] = sorted(schema.get("properties", {}).keys())
             return [
@@ -3034,14 +3480,21 @@ class JobSearchAgentRuntime:
             ]
         else:
             assert target_job_id is not None
+            allowed_hooks, fallback_used = self._ensure_allowed_company_hooks_for_job(
+                target_job_id
+            )
             if self._cover_letter_patch_recovery:
                 patch_fields = self._cover_letter_patch_recovery["patch_fields"]
                 required_shape = self._cover_patch_required_shape(
                     target_job_id,
                     patch_fields,
+                    allowed_hooks=allowed_hooks,
                 )
             else:
-                required_shape = self._cover_draft_required_shape(target_job_id)
+                required_shape = self._cover_draft_required_shape(
+                    target_job_id,
+                    allowed_hooks,
+                )
             constraints = [
                 item.replace("TARGET_JOB_ID", target_job_id)
                 for item in COVER_LETTER_NORMAL_CONSTRAINTS
@@ -3059,6 +3512,9 @@ class JobSearchAgentRuntime:
             "constraints": constraints,
             "target_context": target_context,
         }
+        if allowed_tool == "generate_cover_letter":
+            contract["allowed_company_hooks"] = allowed_hooks
+            contract["cover_letter_hook_extraction_fallback_used"] = fallback_used
         if allowed_tool == "tailor_resume":
             assert target_job_id is not None
             job = self.registry._job(target_job_id)
@@ -3484,7 +3940,18 @@ class JobSearchAgentRuntime:
                             contract,
                         )
                     except (StateInvariantError, ToolRegistryError):
-                        audit = None
+                        try:
+                            if self._is_complete_cover_draft(raw_call.arguments):
+                                structure = self._parse_cover_letter_transport_structure(
+                                    raw_call.arguments
+                                )
+                                transport_args = structure.model_dump(mode="json")
+                                audit = self._audit_cover_letter_transport(
+                                    transport_args,
+                                    contract,
+                                )
+                        except (StateInvariantError, ToolRegistryError):
+                            audit = None
                 self._prepare_cover_patch_recovery(
                     raw_call,
                     contract,
@@ -3501,6 +3968,7 @@ class JobSearchAgentRuntime:
                         "required_argument_shape": self._cover_patch_required_shape(
                             contract["target_job_id"],
                             self._cover_letter_patch_recovery["patch_fields"],
+                            allowed_hooks=contract.get("allowed_company_hooks"),
                         ),
                     }
             self._record_invalid(tool_call=raw_call, error=error)
@@ -4052,6 +4520,7 @@ class JobSearchAgentRuntime:
                     "required_argument_shape": self._cover_patch_required_shape(
                         contract["target_job_id"],
                         patch_fields,
+                        allowed_hooks=contract.get("allowed_company_hooks"),
                     ),
                 }
                 payload = {

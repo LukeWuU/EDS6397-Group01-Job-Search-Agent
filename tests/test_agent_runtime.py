@@ -32,6 +32,7 @@ from src.observability.tracing import LangfuseAgentTracer, NoOpAgentTracer
 from src.services.candidate_loader import load_candidate_bundle
 from src.services.jobs_loader import load_jobs
 from src.services.memory_loader import load_memory
+from src.tools.cover_letter import CoverLetterPlan, _normalize_phrase
 from src.tools.filtering import filtering_tool
 from src.tools.fit_analysis import fit_analysis_tool
 from src.tools.scoring import scoring_tool
@@ -210,6 +211,7 @@ def _compact_cover_draft_from_plan(
     job_id: str,
     *,
     decision_summary: str = "Generate cover letter.",
+    allowed_hook: str | None = None,
 ):
     def _sanitize_text(text: str) -> str:
         return text.replace("controlled evaluation", "controlled validation")
@@ -223,7 +225,7 @@ def _compact_cover_draft_from_plan(
     return {
         "decision_summary": decision_summary,
         "job_id": job_id,
-        "company_hook_phrase": plan.company_hook_phrase,
+        "company_hook_phrase": allowed_hook or plan.company_hook_phrase,
         "body_paragraph_1": {
             "text": _sanitize_text(plan.body_paragraphs[0].text),
             "reason": plan.body_paragraphs[0].reason,
@@ -235,6 +237,12 @@ def _compact_cover_draft_from_plan(
     }
 
 
+def _allowed_company_hooks_for_job(job) -> list[str]:
+    runtime = JobSearchAgentRuntime.__new__(JobSearchAgentRuntime)
+    hooks, _ = runtime._extract_allowed_company_hooks(job)
+    return hooks
+
+
 def _responses(
     scores,
     resume_plans,
@@ -243,6 +251,14 @@ def _responses(
     malformed_tailoring=False,
 ):
     ids = [item.job_id for item in scores]
+    bundle, _, _, _ = _workflow_plans()
+    jobs = load_jobs(ROOT / "data/AI_ML_Jobs_Dataset_20.csv")
+    accepted = filtering_tool(jobs, bundle.profile).accepted_jobs
+    accepted_by_id = {job.job_id: job for job in accepted}
+    hooks_by_job = {
+        job_id: _allowed_company_hooks_for_job(accepted_by_id[job_id])
+        for job_id in ids
+    }
     responses = [
         NormalizedAssistantMessage(
             tool_calls=[
@@ -369,6 +385,7 @@ def _responses(
                         decision_summary=(
                             f"Generate the approved cover letter for {job_id}."
                         ),
+                        allowed_hook=hooks_by_job[job_id][0],
                     ),
                     50 + index,
                 )
@@ -2297,7 +2314,12 @@ def _valid_compact_cover_call(runtime, *, rank: int = 1):
     _, scores, _, cover_plans = _workflow_plans()
     contract = _cover_letter_contract(runtime, rank=rank)
     job_id = contract["target_job_id"]
-    draft = _compact_cover_draft_from_plan(cover_plans[job_id], job_id)
+    allowed_hook = runtime._select_allowed_company_hooks(job_id)[0]
+    draft = _compact_cover_draft_from_plan(
+        cover_plans[job_id],
+        job_id,
+        allowed_hook=allowed_hook,
+    )
     return contract, _tool("generate_cover_letter", draft, rank)
 
 
@@ -2355,6 +2377,11 @@ def _cover_schema_properties(runtime, contract):
     return set(parameters.get("properties", {})), parameters
 
 
+def _cover_schema_enum(runtime, contract, field="company_hook_phrase"):
+    _, parameters = _cover_schema_properties(runtime, contract)
+    return parameters.get("properties", {}).get(field, {}).get("enum")
+
+
 def _patch_contract_from_recovery(runtime, contract, recovery):
     return {
         **contract,
@@ -2362,6 +2389,8 @@ def _patch_contract_from_recovery(runtime, contract, recovery):
         "cover_recovery_mode": "patch",
         "required_argument_shape": recovery["required_argument_shape"],
     }
+
+
 def test_cover_letter_hydration_injects_company_details_field(tmp_path):
     runtime = _runtime_at_cover_letter(tmp_path)
     contract, call = _valid_compact_cover_call(runtime)
@@ -2410,12 +2439,7 @@ def test_cover_letter_hook_repair_preserves_valid_skills(tmp_path):
     preserved = runtime._cover_letter_patch_recovery["base_draft"]
     assert preserved["skills"] == base_skills
     recovery = json.loads(runtime.conversation[-1]["content"])
-    patch_contract = {
-        **contract,
-        "cover_patch_fields": recovery["patch_fields"],
-        "cover_recovery_mode": "patch",
-        "required_argument_shape": recovery["required_argument_shape"],
-    }
+    patch_contract = runtime._next_action_contract()
     assert patch_contract["cover_patch_fields"] == ["company_hook_phrase"]
     patch_call = _tool(
         "generate_cover_letter",
@@ -2496,9 +2520,8 @@ def test_cover_letter_audit_collects_multiple_issues(tmp_path):
             + " I also claim evaluation expertise throughout."
         ),
     }
-    transport = runtime._resolve_cover_letter_transport_arguments(
-        _tool("generate_cover_letter", polluted, 1),
-        contract,
+    transport = runtime._parse_cover_letter_transport_structure(polluted).model_dump(
+        mode="json"
     )
     audit = runtime._audit_cover_letter_transport(transport, contract)
     fields = audit.fields
@@ -2596,7 +2619,10 @@ def test_cover_letter_model_schema_uses_compact_draft(tmp_path):
     schemas = runtime._model_schemas_for_contract(contract)
     assert schemas[0]["function"]["name"] == "generate_cover_letter"
     assert "CoverLetterPlan" not in json.dumps(schemas)
-    assert "company_hook_phrase" in json.dumps(schemas)
+    parameters = schemas[0]["function"]["parameters"]
+    hook_enum = parameters["properties"]["company_hook_phrase"]["enum"]
+    assert hook_enum == contract["allowed_company_hooks"]
+    assert hook_enum == contract["target_context"]["allowed_company_hooks"]
     assert "letter_date" not in json.dumps(schemas)
 
 
@@ -2680,7 +2706,12 @@ def test_all_top3_cover_letters_share_one_letter_date(tmp_path):
         contract = runtime._next_action_contract()
         assert contract["target_rank"] == rank
         job_id = contract["target_job_id"]
-        draft = _compact_cover_draft_from_plan(cover_plans[job_id], job_id)
+        allowed_hook = runtime._select_allowed_company_hooks(job_id)[0]
+        draft = _compact_cover_draft_from_plan(
+            cover_plans[job_id],
+            job_id,
+            allowed_hook=allowed_hook,
+        )
         hydrated = runtime._hydrate_cover_letter_call(
             _tool("generate_cover_letter", draft, rank),
             contract,
@@ -3045,3 +3076,196 @@ def test_cover_letter_top3_payload_sizes_and_patch_schemas(tmp_path):
 
 def test_assignment_tool_registry_still_has_five_tools():
     assert len(AssignmentToolRegistry.model_schemas()) == 5
+
+
+def test_allowed_company_hooks_are_exact_substrings(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    assert runtime.registry is not None
+    for job_id in runtime.state.top_3_job_ids:
+        job = runtime.registry._job(job_id)
+        hooks = runtime._select_allowed_company_hooks(job_id)
+        assert 1 <= len(hooks) <= 6
+        seen: set[str] = set()
+        for hook in hooks:
+            assert hook in job.company_details
+            normalized = _normalize_phrase(hook)
+            assert normalized in _normalize_phrase(job.company_details)
+            assert 4 <= len(hook.split()) <= 15
+            assert runtime._hook_meaningful_word_count(hook) >= 4
+            assert normalized not in seen
+            seen.add(normalized)
+        again = runtime._select_allowed_company_hooks(job_id)
+        assert again == hooks
+
+
+def test_allowed_company_hooks_pass_cover_letter_tool_validator(tmp_path, monkeypatch):
+    from src.tools.cover_letter import _validate_company_hook
+
+    monkeypatch.setattr(
+        "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
+    )
+    runtime = _runtime_at_cover_letter(tmp_path)
+    assert runtime.registry is not None
+    for rank, job_id in enumerate(runtime.state.top_3_job_ids, start=1):
+        runtime.state.cover_letters = {
+            runtime.state.top_3_job_ids[index]: object()
+            for index in range(rank - 1)
+        }
+        job = runtime.registry._job(job_id)
+        hook = runtime._select_allowed_company_hooks(job_id)[0]
+        contract = runtime._next_action_contract()
+        draft = _compact_cover_draft_from_plan(
+            _workflow_plans()[3][job_id],
+            job_id,
+            allowed_hook=hook,
+        )
+        hydrated = runtime._hydrate_cover_letter_call(
+            _tool("generate_cover_letter", draft, rank),
+            contract,
+        )
+        plan = CoverLetterPlan.model_validate(hydrated.arguments["plan"])
+        _validate_company_hook(plan, job)
+
+
+def test_cover_letter_checkpoint_exposes_allowed_hooks_not_full_details(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    context = contract["target_context"]
+    assert "allowed_company_hooks" in context
+    assert 1 <= len(context["allowed_company_hooks"]) <= 6
+    assert "company_details_excerpt" not in context
+    assert context["allowed_company_hooks"] == contract["allowed_company_hooks"]
+
+
+def test_cover_letter_invalid_paraphrase_hook_triggers_patch_with_enum(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
+    )
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    paraphrase = (
+        "Chickasaw Nation Industries leverages technology to support federal and "
+        "commercial customers."
+    )
+    invalid = copy.deepcopy(call.arguments)
+    invalid["company_hook_phrase"] = paraphrase
+    invalid["body_paragraph_1"] = {
+        **invalid["body_paragraph_1"],
+        "reason": " ".join(["word"] * 30),
+    }
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("generate_cover_letter", invalid, 2)]),
+        contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert set(recovery["patch_fields"]) == {"company_hook_phrase", "body_paragraph_1"}
+    patch_contract = runtime._next_action_contract()
+    properties, _ = _cover_schema_properties(runtime, patch_contract)
+    assert properties == {"job_id", "company_hook_phrase", "body_paragraph_1"}
+    hook_enum = _cover_schema_enum(runtime, patch_contract)
+    assert hook_enum == patch_contract["allowed_company_hooks"]
+    fixed = {
+        "job_id": contract["target_job_id"],
+        "company_hook_phrase": hook_enum[0],
+        "body_paragraph_1": call.arguments["body_paragraph_1"],
+    }
+    runtime.state.model_call_count = 2
+    valid, invalid_count = runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("generate_cover_letter", fixed, 3)]),
+        patch_contract,
+    )
+    assert valid == 1
+    assert invalid_count == 0
+
+
+def test_cover_letter_hook_only_patch_enum_succeeds(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
+    )
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    invalid = copy.deepcopy(call.arguments)
+    invalid["company_hook_phrase"] = (
+        "Chickasaw Nation Industries leverages technology to support federal and "
+        "commercial customers."
+    )
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("generate_cover_letter", invalid, 2)]),
+        contract,
+    )
+    patch_contract = runtime._next_action_contract()
+    assert patch_contract["cover_patch_fields"] == ["company_hook_phrase"]
+    properties, parameters = _cover_schema_properties(runtime, patch_contract)
+    assert properties == {"job_id", "company_hook_phrase"}
+    assert parameters.get("additionalProperties") is False
+    hook_enum = _cover_schema_enum(runtime, patch_contract)
+    patch = {
+        "job_id": contract["target_job_id"],
+        "company_hook_phrase": hook_enum[0],
+    }
+    runtime.state.model_call_count = 2
+    valid, invalid_count = runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("generate_cover_letter", patch, 3)]),
+        patch_contract,
+    )
+    assert valid == 1
+    assert invalid_count == 0
+
+
+def test_cover_letter_hook_enum_rejects_out_of_enum_patch(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    invalid = copy.deepcopy(call.arguments)
+    invalid["company_hook_phrase"] = (
+        "Chickasaw Nation Industries leverages technology to support federal and "
+        "commercial customers."
+    )
+    runtime.state.model_call_count = 1
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(tool_calls=[_tool("generate_cover_letter", invalid, 2)]),
+        contract,
+    )
+    patch_contract = runtime._next_action_contract()
+    base_skills = runtime._cover_letter_patch_recovery["base_draft"]["skills"]
+    runtime.state.model_call_count = 2
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "generate_cover_letter",
+                    {
+                        "job_id": contract["target_job_id"],
+                        "company_hook_phrase": "still not an allowed hook option",
+                    },
+                    3,
+                )
+            ]
+        ),
+        patch_contract,
+    )
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["error_category"] == "draft_schema"
+    assert recovery["patch_fields"] == ["company_hook_phrase"]
+    assert runtime._cover_letter_patch_recovery["base_draft"]["skills"] == base_skills
+    schema_size = len(json.dumps(runtime._model_schemas_for_contract(patch_contract)))
+    runtime.state.model_call_count = 3
+    runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[
+                _tool(
+                    "generate_cover_letter",
+                    {
+                        "job_id": contract["target_job_id"],
+                        "company_hook_phrase": "still not an allowed hook option",
+                    },
+                    4,
+                )
+            ]
+        ),
+        patch_contract,
+    )
+    assert len(json.dumps(runtime._model_schemas_for_contract(patch_contract))) == schema_size

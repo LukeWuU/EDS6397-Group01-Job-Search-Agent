@@ -214,12 +214,18 @@ COVER_LETTER_NORMAL_CONSTRAINTS = [
     "Write company_hook_phrase only; Python sets company_hook_source_field.",
     "Provide body_paragraph_1 and optional body_paragraph_2 with text and reason only.",
     (
+        "Select exactly one company_hook_phrase from target_context.allowed_company_hooks. "
+        "Copy it character-for-character. Do not paraphrase, shorten, expand, combine, "
+        "or rewrite it."
+    ),
+    (
         "Choose 3–8 skills only from the provided allowed_skills list. Do not copy "
         "every option unless the list itself contains eight or fewer and every "
         "selected skill is needed."
     ),
     "Do not claim skills listed in target_context.do_not_claim_skills.",
-    "Ground company_hook_phrase in target_context.company_details_excerpt.",
+    "Do not add the company name unless it is already in the selected hook option.",
+    "Do not add introductory text to company_hook_phrase.",
     "Use approved memory facts from target_context.current_memory_facts when relevant.",
     "Python injects citations, evidence IDs, source fields, letter_date, and nested plan.",
     "Never author citation objects, source IDs, source fields, or evidence IDs.",
