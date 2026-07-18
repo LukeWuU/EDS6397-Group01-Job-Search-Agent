@@ -20,6 +20,9 @@ from src.services.jobs_loader import load_jobs
 from src.services.memory_loader import load_memory
 
 
+OLLAMA_PREFLIGHT_TIMEOUT_SECONDS = 60.0
+
+
 class PreflightStatus(StrEnum):
     """Allowed read-only check outcomes."""
 
@@ -443,7 +446,10 @@ def run_preflight(
     ollama_client = None
     installed_models: list[str] = []
     try:
-        ollama_client = ollama_client_factory(host=config.ollama_host, timeout=8.0)
+        ollama_client = ollama_client_factory(
+            host=config.ollama_host,
+            timeout=OLLAMA_PREFLIGHT_TIMEOUT_SECONDS,
+        )
         listed = ollama_client.list()
         installed_models = _installed_model_names(listed)
         checks.append(
@@ -515,6 +521,7 @@ def run_preflight(
                 options={
                     "temperature": 0,
                     "num_ctx": min(config.ollama_num_ctx, 2048),
+                    "num_predict": 16,
                 },
                 keep_alive=config.ollama_keep_alive,
             )
@@ -654,6 +661,7 @@ def format_preflight_result(result: PreflightResult) -> str:
 
 
 __all__ = [
+    "OLLAMA_PREFLIGHT_TIMEOUT_SECONDS",
     "PathSafetyError",
     "PreflightCheck",
     "PreflightResult",

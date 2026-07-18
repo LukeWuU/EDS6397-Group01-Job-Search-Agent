@@ -14,6 +14,7 @@ from pypdf import PdfWriter
 
 from src.config import AppConfig
 from src.services.preflight import (
+    OLLAMA_PREFLIGHT_TIMEOUT_SECONDS,
     PathSafetyError,
     PreflightStatus,
     run_preflight,
@@ -54,10 +55,18 @@ def _copy_inputs(tmp_path: Path) -> dict[str, Path]:
 
 
 class FakeOllama:
-    def __init__(self, *, reachable=True, model=True, chat=True):
+    def __init__(
+        self,
+        *,
+        reachable=True,
+        model=True,
+        chat=True,
+        chat_exception: Exception | None = None,
+    ):
         self.reachable = reachable
         self.model = model
         self.chat_ok = chat
+        self.chat_exception = chat_exception
         self.chat_calls = []
 
     def list(self):
@@ -67,6 +76,8 @@ class FakeOllama:
 
     def chat(self, **kwargs):
         self.chat_calls.append(kwargs)
+        if self.chat_exception is not None:
+            raise self.chat_exception
         if not self.chat_ok:
             raise RuntimeError("chat failed")
         return {"message": {"content": "PREFLIGHT_OK"}}
@@ -74,7 +85,7 @@ class FakeOllama:
 
 def _factory(fake):
     def create(**kwargs):
-        assert kwargs["timeout"] == 8.0
+        assert kwargs["timeout"] == OLLAMA_PREFLIGHT_TIMEOUT_SECONDS == 60.0
         return fake
 
     return create
@@ -112,7 +123,14 @@ def test_all_checks_pass_without_modifying_inputs_or_outputs(tmp_path):
     paths = _copy_inputs(tmp_path)
     before = _hashes(paths)
     fake = FakeOllama()
-    result = _run(paths, fake)
+    result = _run(
+        paths,
+        fake,
+        config=AppConfig(
+            langfuse_enabled=False,
+            ollama_keep_alive="7m",
+        ),
+    )
     assert result.succeeded
     assert result.job_count == 20
     assert result.candidate_id == "cand-mira-solenne-001"
@@ -124,6 +142,9 @@ def test_all_checks_pass_without_modifying_inputs_or_outputs(tmp_path):
     assert call["think"] is False and call["stream"] is False
     assert call["options"]["temperature"] == 0
     assert call["options"]["num_ctx"] <= 2048
+    assert call["options"]["num_predict"] == 16
+    assert call["keep_alive"] == "7m"
+    assert _status(result, "Ollama chat") == PreflightStatus.PASS
 
 
 def test_missing_csv_invalid_candidate_and_memory_mismatch_fail(tmp_path):
@@ -171,6 +192,49 @@ def test_two_page_resume_and_missing_pdflatex_fail(tmp_path):
 def test_ollama_failure_modes_are_reported(tmp_path, fake, failed_check):
     result = _run(_copy_inputs(tmp_path), fake)
     assert _status(result, failed_check) == PreflightStatus.FAIL
+
+
+def test_simulated_ollama_timeout_remains_a_read_only_failure(
+    tmp_path,
+    monkeypatch,
+):
+    class ReadTimeout(Exception):
+        pass
+
+    source_memory = ROOT / "memory.json"
+    memory_before = hashlib.sha256(source_memory.read_bytes()).hexdigest()
+    source_outputs = ROOT / "outputs"
+    outputs_before = (
+        sorted(str(path.relative_to(source_outputs)) for path in source_outputs.rglob("*"))
+        if source_outputs.exists()
+        else []
+    )
+    monkeypatch.setattr(
+        "src.observability.tracing.build_agent_tracer",
+        lambda *args, **kwargs: pytest.fail("Preflight must not create a trace"),
+    )
+    paths = _copy_inputs(tmp_path)
+    before = _hashes(paths)
+
+    result = _run(
+        paths,
+        FakeOllama(chat_exception=ReadTimeout("simulated timeout")),
+    )
+
+    assert _status(result, "Ollama chat") == PreflightStatus.FAIL
+    chat_check = next(
+        check for check in result.checks if check.name == "Ollama chat"
+    )
+    assert "ReadTimeout" in chat_check.message
+    assert not paths["output_root"].exists()
+    assert _hashes(paths) == before
+    assert hashlib.sha256(source_memory.read_bytes()).hexdigest() == memory_before
+    outputs_after = (
+        sorted(str(path.relative_to(source_outputs)) for path in source_outputs.rglob("*"))
+        if source_outputs.exists()
+        else []
+    )
+    assert outputs_after == outputs_before
 
 
 def test_langfuse_configuration_is_local_only(tmp_path):
