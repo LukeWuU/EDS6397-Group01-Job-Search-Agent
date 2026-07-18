@@ -20,8 +20,7 @@ from src.agent.prompts import (
     COVER_LETTER_PLAN_LIMITS,
     SYSTEM_PROMPT,
     TAILOR_RESUME_ARGUMENT_TEMPLATE,
-    TAILOR_RESUME_CONSTRAINTS,
-    TAILOR_RESUME_PLAN_LIMITS,
+    TAILOR_RESUME_NORMAL_CONSTRAINTS,
 )
 from src.agent.state import (
     AgentPhase,
@@ -158,7 +157,35 @@ class JobSearchAgentRuntime:
         return {
             key: value
             for key, value in contract.items()
-            if key != "exact_tailor_resume_structural_template"
+            if key
+            not in {
+                "exact_tailor_resume_structural_template",
+                "target_context",
+            }
+        }
+
+    def _serialized_conversation_char_count(self) -> int:
+        return len(
+            json.dumps(
+                self.conversation,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+
+    def _model_call_diagnostics(
+        self,
+        contract: dict[str, Any],
+        schemas: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "model_message_count": len(self.conversation),
+            "serialized_message_char_count": self._serialized_conversation_char_count(),
+            "serialized_tool_schema_char_count": len(
+                json.dumps(schemas, ensure_ascii=False, separators=(",", ":"))
+            ),
+            "phase": contract["phase"],
+            "target_rank": contract.get("target_rank"),
         }
 
     def _build_workflow_checkpoint(self, contract: dict[str, Any]) -> dict[str, Any]:
@@ -457,22 +484,14 @@ class JobSearchAgentRuntime:
         analysis = self.state.fit_analyses[job_id]
         job = self.registry._job(job_id)
         profile = self.registry.bundle.profile
-        editable_bullets = []
-        citation_contract = self._build_citation_contract(job_id)
-        for bullet in self._editable_tailoring_bullets():
-            editable_bullets.append(
-                {
-                    "bullet_id": bullet.bullet_id,
-                    "text": bullet.text,
-                    "evidence_ids": list(bullet.evidence_ids),
-                    "required_citations": citation_contract[
-                        "bullet_required_citations"
-                    ].get(
-                        bullet.bullet_id,
-                        [],
-                    ),
-                }
-            )
+        editable_bullets = [
+            {
+                "bullet_id": bullet.bullet_id,
+                "text": bullet.text,
+                "evidence_ids": list(bullet.evidence_ids),
+            }
+            for bullet in self._editable_tailoring_bullets()
+        ]
         relevant_skills = [
             *analysis.core_skills.aligned_skills,
             *analysis.core_skills.evidenced_elsewhere_skills,
@@ -526,7 +545,6 @@ class JobSearchAgentRuntime:
                 for fact in self.registry.memory.facts
             ],
             "revision_feedback": revision_feedback,
-            "citation_contract": citation_contract,
         }
 
     def _tailor_required_shape(
@@ -701,15 +719,16 @@ class JobSearchAgentRuntime:
                 target_job_id,
                 revision_feedback=revision_feedback,
             )
+            citation_contract = self._build_citation_contract(target_job_id)
             required_shape = self._tailor_required_shape(
                 target_job_id,
                 expected_swap=expected_swap,
-                citation_contract=target_context["citation_contract"],
+                citation_contract=citation_contract,
             )
             constraints = [
                 item.replace("TARGET_JOB_ID", target_job_id)
-                for item in TAILOR_RESUME_CONSTRAINTS
-            ] + list(TAILOR_RESUME_PLAN_LIMITS)
+                for item in TAILOR_RESUME_NORMAL_CONSTRAINTS
+            ]
         else:
             assert target_job_id is not None
             required_shape = {
@@ -862,13 +881,12 @@ class JobSearchAgentRuntime:
                 self.state.mark_completed()
                 break
             contract = self._next_action_contract()
-            if not self._conversation_ends_with_invalid_recovery():
+            if not self._conversation_ends_with_bounded_recovery():
                 if self._phase_needs_compaction(contract["phase"]):
                     self._apply_conversation_checkpoint(contract)
                 else:
                     self._append_state_snapshot(contract)
             response = self._call_model(self.trace, contract)
-            self._append_assistant_message(response)
             valid_count, invalid_count = self._execute_response_calls(
                 response,
                 contract,
@@ -885,7 +903,7 @@ class JobSearchAgentRuntime:
                         "Maximum consecutive invalid tool-call turns reached"
                     )
 
-    def _conversation_ends_with_invalid_recovery(self) -> bool:
+    def _conversation_ends_with_bounded_recovery(self) -> bool:
         if not self.conversation:
             return False
         content = self.conversation[-1].get("content")
@@ -895,10 +913,12 @@ class JobSearchAgentRuntime:
             payload = json.loads(content)
         except json.JSONDecodeError:
             return False
-        return (
-            isinstance(payload, dict)
-            and payload.get("status") == "invalid_tool_call"
-        )
+        if not isinstance(payload, dict):
+            return False
+        return payload.get("type") in {
+            "tool_call_retry",
+            "invalid_tool_call_recovery",
+        }
 
     def _append_state_snapshot(self, contract: dict[str, Any]) -> None:
         assert self.state is not None
@@ -935,6 +955,7 @@ class JobSearchAgentRuntime:
             raise AgentLoopLimitError("Maximum model-call count reached")
         schemas = self.registry.model_schemas([contract["allowed_tool"]])
         call_number = self.state.model_call_count + 1
+        payload_diagnostics = self._model_call_diagnostics(contract, schemas)
         self._report_progress(self._phase_progress_message(contract))
         self._report_progress(
             f"Model call {call_number}/{MAX_MODEL_CALLS}: "
@@ -959,7 +980,10 @@ class JobSearchAgentRuntime:
                     ),
                 },
             },
-            metadata={"model_call_number": call_number},
+            metadata={
+                "model_call_number": call_number,
+                **payload_diagnostics,
+            },
             observation_type="generation",
         ) as span:
             response = self.client.chat(self.conversation, schemas)
@@ -1008,7 +1032,12 @@ class JobSearchAgentRuntime:
                     length_limited=length_limited,
                 )
             self._record_invalid(tool_call=call, error=error)
-            self._append_invalid_message(call, error, contract)
+            self._rebuild_bounded_recovery(
+                contract,
+                error=error,
+                tool_call=call,
+                length_limited=length_limited,
+            )
             return 0, 1
 
         call = response.tool_calls[0]
@@ -1022,13 +1051,18 @@ class JobSearchAgentRuntime:
                 call.name,
                 job_id=getattr(baseline_arguments, "job_id", None),
             )
+            self._append_assistant_message(response)
             self._execute_model_tool_call(call)
         except (StateInvariantError, ToolRegistryError) as exc:
             error = str(exc)
             if self._is_citation_error(error):
                 self._report_citation_rejection_progress()
             self._record_invalid(tool_call=call, error=error)
-            self._append_invalid_message(call, error, contract)
+            self._rebuild_bounded_recovery(
+                contract,
+                error=error,
+                tool_call=call,
+            )
             return 0, 1
         return 1, 0
 
@@ -1253,32 +1287,13 @@ class JobSearchAgentRuntime:
             )
         )
 
-    def _append_invalid_message(
+    def _build_compact_invalid_recovery(
         self,
         tool_call: NormalizedToolCall | None,
         error: str,
         contract: dict[str, Any],
-    ) -> None:
-        assert self.state is not None
+    ) -> dict[str, Any]:
         diagnostics = self._argument_diagnostics(tool_call, contract)
-        payload: dict[str, Any] = {
-            "status": "invalid_tool_call",
-            "requested_tool": tool_call.name if tool_call else None,
-            "error": error[:2000],
-            "field_diagnostics": diagnostics,
-            "target_job_id": contract.get("target_job_id"),
-            "allowed_tool": contract["allowed_tool"],
-            "required_argument_shape": contract["required_argument_shape"],
-            "target_context": contract.get("target_context"),
-            "constraints": contract["constraints"],
-            "instruction": [
-                "Return exactly one tool call.",
-                "Do not return prose-only content.",
-                "Do not call a different tool.",
-                "Do not target another job.",
-                "Correct every missing, extra, or misplaced field exactly.",
-            ],
-        }
         structural_missing = [
             field
             for field in diagnostics["missing_fields"]
@@ -1293,7 +1308,29 @@ class JobSearchAgentRuntime:
                 or diagnostics["replacement_schema_keys"]
             )
         )
+        citation_issues = (
+            contract["allowed_tool"] == "tailor_resume"
+            and self._is_citation_error(error)
+        )
+        if structure_issues and citation_issues:
+            error_category = "structural_and_citation"
+        elif structure_issues:
+            error_category = "structural"
+        elif citation_issues:
+            error_category = "citation"
+        else:
+            error_category = "validation"
+
+        payload: dict[str, Any] = {
+            "type": "invalid_tool_call_recovery",
+            "error_category": error_category,
+            "allowed_tool": contract["allowed_tool"],
+            "target_job_id": contract.get("target_job_id"),
+            "error": error[:500],
+            "instruction": "Return exactly one corrected tool call using the checkpoint.",
+        }
         if structure_issues:
+            payload["field_diagnostics"] = diagnostics
             target_job_id = contract.get("target_job_id")
             template = copy.deepcopy(TAILOR_RESUME_ARGUMENT_TEMPLATE)
             if target_job_id:
@@ -1301,36 +1338,83 @@ class JobSearchAgentRuntime:
                 template["edit_plan"]["job_id"] = target_job_id
             payload["exact_tailor_resume_structural_template"] = template
         target_job_id = contract.get("target_job_id")
-        if (
-            contract["allowed_tool"] == "tailor_resume"
-            and target_job_id
-            and self._is_citation_error(error)
-        ):
+        if citation_issues and target_job_id:
             payload["citation_recovery_contract"] = (
                 self._build_citation_recovery_contract(target_job_id)
             )
-            payload["instruction"].append(
-                "Copy every supplied citation identity field exactly."
+            payload["instruction"] = (
+                "Copy every supplied citation identity field exactly and "
+                "return one corrected tool call using the checkpoint."
             )
-        self.conversation.append(
+        return payload
+
+    def _rebuild_bounded_recovery(
+        self,
+        contract: dict[str, Any],
+        *,
+        error: str,
+        tool_call: NormalizedToolCall | None = None,
+        length_limited: bool = False,
+    ) -> None:
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
             {
-                "role": "tool" if tool_call else "user",
-                **(
-                    {
-                        "tool_name": tool_call.name,
-                        **(
-                            {"tool_call_id": tool_call.id}
-                            if tool_call.id
-                            else {}
-                        ),
-                    }
-                    if tool_call
-                    else {}
-                ),
+                "role": "user",
                 "content": json.dumps(
-                    payload, ensure_ascii=False, separators=(",", ":")
+                    self._build_workflow_checkpoint(contract),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
                 ),
-            }
+            },
+        ]
+        if tool_call is None:
+            reason = "generation_limit" if length_limited else "missing_tool_call"
+            messages.append(
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "type": "tool_call_retry",
+                            "reason": reason,
+                            "allowed_tool": contract["allowed_tool"],
+                            "target_job_id": contract.get("target_job_id"),
+                            "instruction": (
+                                "Return exactly one complete tool call using "
+                                "the checkpoint."
+                            ),
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                }
+            )
+        else:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        self._build_compact_invalid_recovery(
+                            tool_call,
+                            error,
+                            contract,
+                        ),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                }
+            )
+        self.conversation = messages
+
+    def _append_invalid_message(
+        self,
+        tool_call: NormalizedToolCall | None,
+        error: str,
+        contract: dict[str, Any],
+    ) -> None:
+        self._rebuild_bounded_recovery(
+            contract,
+            error=error,
+            tool_call=tool_call,
         )
 
     def _run_human_review(self) -> None:
@@ -1492,7 +1576,6 @@ class JobSearchAgentRuntime:
         invalid_turns = 0
         while True:
             response = self._call_model(trace_parent, contract)
-            self._append_assistant_message(response)
             self._requested_tool_call_count += len(response.tool_calls)
             if self._requested_tool_call_count > MAX_TOOL_CALLS:
                 raise AgentLoopLimitError(
@@ -1517,12 +1600,18 @@ class JobSearchAgentRuntime:
                         )
                 call = response.tool_calls[0] if response.tool_calls else None
                 self._record_invalid(tool_call=call, error=error)
-                self._append_invalid_message(call, error, contract)
+                self._rebuild_bounded_recovery(
+                    contract,
+                    error=error,
+                    tool_call=call,
+                    length_limited=length_limited,
+                )
                 invalid_turns += 1
             else:
                 call = response.tool_calls[0]
                 try:
                     self._validate_call_for_contract(call, contract)
+                    self._append_assistant_message(response)
                     outcome = self._execute_model_tool_call(
                         call,
                         revision_round=next_revision_round,
@@ -1534,7 +1623,11 @@ class JobSearchAgentRuntime:
                     if self._is_citation_error(error):
                         self._report_citation_rejection_progress()
                     self._record_invalid(tool_call=call, error=error)
-                    self._append_invalid_message(call, error, contract)
+                    self._rebuild_bounded_recovery(
+                        contract,
+                        error=error,
+                        tool_call=call,
+                    )
                     invalid_turns += 1
                 else:
                     self.state.consecutive_invalid_call_count = 0

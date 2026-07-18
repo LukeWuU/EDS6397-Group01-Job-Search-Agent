@@ -73,6 +73,28 @@ TAILOR_RESUME_ARGUMENT_TEMPLATE = {
     },
 }
 
+TAILOR_RESUME_NORMAL_CONSTRAINTS = [
+    "Return exactly one tailor_resume tool call.",
+    "Outer job_id and edit_plan.job_id must equal TARGET_JOB_ID.",
+    "Exactly two different editable experience bullet IDs are required.",
+    "Copy citation identity objects from required_argument_shape exactly.",
+    (
+        "Summary requires job and candidate evidence; each bullet requires "
+        "its bullet and job citations."
+    ),
+    (
+        "Preserve supported facts and metrics; no unsupported or "
+        "genuine-gap claims."
+    ),
+    "project_swap must match the target Fit Analysis.",
+    (
+        "professional_summary.new_text: at most 55 words; each bullet new_text: "
+        "at most 32 words; each reason: at most 18 words; plan_rationale: "
+        "at most 25 words."
+    ),
+    "No prose outside the tool call.",
+]
+
 TAILOR_RESUME_CONSTRAINTS = [
     "job_id is required twice.",
     "Outer job_id and edit_plan.job_id must both equal TARGET_JOB_ID.",
@@ -173,6 +195,7 @@ COVER_LETTER_PLAN_LIMITS = [
 __all__ = [
     "SYSTEM_PROMPT",
     "TAILOR_RESUME_ARGUMENT_TEMPLATE",
+    "TAILOR_RESUME_NORMAL_CONSTRAINTS",
     "TAILOR_RESUME_CONSTRAINTS",
     "TAILOR_RESUME_PLAN_LIMITS",
     "COVER_LETTER_PLAN_LIMITS",

@@ -16,6 +16,7 @@ from src.agent.client import (
     NormalizedToolCall,
 )
 from src.agent.runtime import AgentLoopLimitError, JobSearchAgentRuntime
+from src.agent.prompts import TAILOR_RESUME_CONSTRAINTS, TAILOR_RESUME_PLAN_LIMITS
 from src.agent.state import AgentPhase, StateInvariantError
 from src.agent.tool_registry import ToolArgumentsError
 from src.config import AppConfig
@@ -462,11 +463,14 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     message_counts = [call["message_count"] for call in client.calls]
     assert message_counts[:5] == sorted(message_counts[:5])
     assert message_counts[5] == 2
+    assert message_counts[6] == 3
+    assert message_counts[7] == 3
     assert all(count <= 14 for count in message_counts)
     assert runtime.state is not None
     assert runtime.state.consecutive_invalid_call_count == 0
     first_recovery = json.loads(client.calls[6]["messages"][-1]["content"])
     second_recovery = json.loads(client.calls[7]["messages"][-1]["content"])
+    assert first_recovery["type"] == "invalid_tool_call_recovery"
     assert first_recovery["allowed_tool"] == "tailor_resume"
     assert first_recovery["target_job_id"] == scores[0].job_id
     assert set(first_recovery["field_diagnostics"]["replacement_schema_keys"]) == {
@@ -482,21 +486,14 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
         "project_swap",
     }
     assert "project_swap must be null" in second_recovery["error"]
-    serialized_recovery = json.dumps(first_recovery)
-    assert "Outer job_id and edit_plan.job_id" in serialized_recovery
-    assert first_recovery["target_context"]["project_swap"] is None
+    assert "required_argument_shape" not in first_recovery
+    assert "target_context" not in first_recovery
+    assert "constraints" not in first_recovery
+    first_checkpoint = json.loads(client.calls[6]["messages"][1]["content"])
+    assert first_checkpoint["target_context"]["project_swap"] is None
     contracts = []
     for call in client.calls:
-        contract = None
-        for message in reversed(call["messages"]):
-            if message.get("role") != "user":
-                continue
-            payload = json.loads(message["content"])
-            if "next_action_contract" in payload:
-                contract = payload["next_action_contract"]
-                break
-        assert contract is not None
-        contracts.append(contract)
+        contracts.append(_checkpoint_contract_from_messages(call["messages"]))
     assert [
         (item["allowed_tool"], item["target_job_id"])
         for item in contracts
@@ -516,22 +513,27 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
         ("generate_cover_letter", scores[1].job_id),
         ("generate_cover_letter", scores[2].job_id),
     ]
-    first_tailoring_context = contracts[5]["target_context"]
+    first_tailoring_messages = client.calls[5]["messages"]
+    tailoring_checkpoint = json.loads(first_tailoring_messages[1]["content"])
+    first_tailoring_context = tailoring_checkpoint["target_context"]
     assert first_tailoring_context["target_job_id"] == scores[0].job_id
     assert first_tailoring_context["rank"] == 1
     assert first_tailoring_context["project_swap"] is None
+    assert "citation_contract" not in first_tailoring_context
+    assert "required_citations" not in json.dumps(
+        first_tailoring_context["editable_experience_bullets"]
+    )
+    assert "target_context" not in tailoring_checkpoint["next_action_contract"]
     assert scores[1].job_id not in json.dumps(first_tailoring_context)
     assert scores[2].job_id not in json.dumps(first_tailoring_context)
-    first_tailoring_messages = client.calls[5]["messages"]
     assert first_tailoring_messages[0]["role"] == "system"
-    tailoring_checkpoint = json.loads(first_tailoring_messages[1]["content"])
     assert tailoring_checkpoint["type"] == "workflow_checkpoint"
     assert "current_state" not in json.dumps(first_tailoring_messages)
     assert "exact_tailor_resume_structural_template" not in json.dumps(
         tailoring_checkpoint
     )
-    assert "citation_contract" in first_tailoring_context
-    assert "citation_contract" in tailoring_checkpoint["target_context"]
+    shape = contracts[5]["required_argument_shape"]
+    assert shape["edit_plan"]["professional_summary"]["citations"]
     assert len(first_tailoring_messages) == 2
     assert set(runtime.state.fit_analyses) == {score.job_id for score in scores}
     assert runtime.registry is not None
@@ -616,18 +618,13 @@ def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
             "experience_bullet_edits"
         ]
     ) == 2
-    assert "exact_tailor_resume_structural_template" not in first_contract
     plan_limits = " ".join(first_contract["constraints"])
+    assert "Copy citation identity objects" in plan_limits
     assert "at most 55 words" in plan_limits
-    assert "at most 32 words" in plan_limits
-    assert "Exactly two different experience_bullet_edits" in plan_limits
+    assert "Exactly two different editable experience bullet IDs" in plan_limits
     safety_contract = " ".join(first_contract["constraints"])
-    assert "exact supplied job_posting" in safety_contract
-    assert "exact supplied candidate-side citation" in safety_contract
-    assert "Copy supplied citation identity fields exactly" in safety_contract
-    assert "genuine-gap skill" in safety_contract
-    assert "Never invent patient data" in safety_contract
-    assert "Protected resume regions" in safety_contract
+    assert "genuine-gap" in safety_contract
+    assert "project_swap must match" in safety_contract
 
     complete_analyses = dict(runtime.state.fit_analyses)
     runtime.state.fit_analyses = {
@@ -952,13 +949,17 @@ def test_exact_structural_template_is_recovery_only(tmp_path):
     ids = runtime.state.top_3_job_ids
     contract = runtime._next_action_contract()
 
-    runtime._append_invalid_message(
-        None,
-        "Model response reached the generation limit before completing a tool call",
+    runtime._rebuild_bounded_recovery(
         contract,
+        error="Model response reached the generation limit before completing a tool call",
+        tool_call=None,
+        length_limited=True,
     )
     length_payload = json.loads(runtime.conversation[-1]["content"])
+    assert length_payload["type"] == "tool_call_retry"
+    assert length_payload["reason"] == "generation_limit"
     assert "exact_tailor_resume_structural_template" not in length_payload
+    assert len(runtime.conversation) == 3
 
     generic_call = _tool(
         "tailor_resume",
@@ -976,6 +977,7 @@ def test_exact_structural_template_is_recovery_only(tmp_path):
     )
     runtime._append_invalid_message(generic_call, "Invalid shape", contract)
     recovery_payload = json.loads(runtime.conversation[-1]["content"])
+    assert recovery_payload["type"] == "invalid_tool_call_recovery"
     assert "exact_tailor_resume_structural_template" in recovery_payload
     template = recovery_payload["exact_tailor_resume_structural_template"]
     assert template["job_id"] == ids[0]
@@ -1013,9 +1015,29 @@ def test_length_limited_empty_response_is_invalid_without_side_effects(
     assert runtime.state.invalid_tool_attempts[-1].error.startswith(
         "Model response reached the generation limit"
     )
+    assert len(runtime.conversation) == 3
+    assert runtime.conversation[0]["role"] == "system"
+    retry = json.loads(runtime.conversation[-1]["content"])
+    assert retry["type"] == "tool_call_retry"
+    assert retry["reason"] == "generation_limit"
+    assert "required_argument_shape" not in retry
+    assert "invalid_tool_call" not in json.dumps(runtime.conversation)
     assert "Model call 6: no complete tool call returned" in progress
     assert "Model completion: length limit" in progress
     assert "decision_summary" not in "\n".join(progress)
+
+    runtime.state.model_call_count = 7
+    response_again = NormalizedAssistantMessage(content="", tool_calls=[])
+    runtime._execute_response_calls(response_again, contract)
+    assert len(runtime.conversation) == 3
+    assert runtime._serialized_conversation_char_count() == len(
+        json.dumps(runtime.conversation, separators=(",", ":"))
+    )
+    second_size = runtime._serialized_conversation_char_count()
+    runtime.state.model_call_count = 8
+    runtime._execute_response_calls(response_again, contract)
+    assert len(runtime.conversation) == 3
+    assert runtime._serialized_conversation_char_count() == second_size
 
 
 def test_cover_letter_contract_includes_concise_limits(tmp_path):
@@ -1034,6 +1056,65 @@ def test_cover_letter_contract_includes_concise_limits(tmp_path):
     assert "at most 90 words" in limits
     assert "at most 15 words" in limits
     assert contract["target_context"]["approved_resume_revision"] == 0
+
+
+def _checkpoint_contract_from_messages(messages):
+    contract = None
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        payload = json.loads(message["content"])
+        if payload.get("type") == "workflow_checkpoint":
+            contract = dict(payload["next_action_contract"])
+            if "target_context" in payload:
+                contract["target_context"] = payload["target_context"]
+            return contract
+        if "next_action_contract" in payload:
+            contract = payload["next_action_contract"]
+            if "target_context" in payload:
+                contract["target_context"] = payload["target_context"]
+            return contract
+    assert contract is not None
+    return contract
+
+
+def _legacy_duplicated_tailoring_messages(runtime, contract):
+    """Approximate the pre-deduplication tailoring payload for size comparison."""
+    assert runtime.registry is not None
+    target_job_id = contract["target_job_id"]
+    citation_contract = runtime._build_citation_contract(target_job_id)
+    target_context = runtime._tailoring_context(target_job_id)
+    target_context["citation_contract"] = citation_contract
+    target_context["editable_experience_bullets"] = [
+        {
+            **bullet,
+            "required_citations": citation_contract["bullet_required_citations"].get(
+                bullet["bullet_id"],
+                [],
+            ),
+        }
+        for bullet in target_context["editable_experience_bullets"]
+    ]
+    duplicated_contract = {
+        **runtime._contract_for_model(contract),
+        "target_context": target_context,
+        "constraints": list(TAILOR_RESUME_CONSTRAINTS)
+        + list(TAILOR_RESUME_PLAN_LIMITS),
+    }
+    checkpoint = runtime._build_workflow_checkpoint(
+        {**contract, "target_context": target_context}
+    )
+    checkpoint["next_action_contract"] = duplicated_contract
+    checkpoint["target_context"] = target_context
+    return [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": json.dumps(checkpoint, separators=(",", ":"))},
+    ]
+
+
+def _current_tailoring_messages(runtime, contract):
+    runtime._apply_conversation_checkpoint(contract)
+    return list(runtime.conversation)
 
 
 def _tailoring_contract(runtime):
@@ -1107,8 +1188,8 @@ def test_tailoring_citation_contract_is_exact_and_target_specific(tmp_path):
     contract = _tailoring_contract(runtime)
     job_id = contract["target_job_id"]
     candidate_id = runtime.registry.bundle.profile.candidate_id
-    citation_contract = contract["target_context"]["citation_contract"]
     shape = contract["required_argument_shape"]
+    citation_contract = runtime._build_citation_contract(job_id)
 
     default_job = citation_contract["default_job_citation"]
     assert default_job == {
@@ -1117,10 +1198,15 @@ def test_tailoring_citation_contract_is_exact_and_target_specific(tmp_path):
         "source_field": "required_skills_raw",
         "evidence_id": None,
     }
-    assert "aligned_skills" in citation_contract["invalid_job_source_fields"]
-    assert "job_posting" in citation_contract["invalid_job_source_fields"]
+    assert "citation_contract" not in contract["target_context"]
+    assert "required_citations" not in json.dumps(
+        contract["target_context"]["editable_experience_bullets"]
+    )
+    assert "target_context" not in json.dumps(
+        runtime._build_workflow_checkpoint(contract)["next_action_contract"]
+    )
 
-    summary_citations = citation_contract["summary_required_citations"]
+    summary_citations = shape["edit_plan"]["professional_summary"]["citations"]
     assert summary_citations[0]["source_type"] == "job_posting"
     assert summary_citations[0]["source_id"] == job_id
     assert summary_citations[0]["source_field"] in Job.model_fields
@@ -1132,8 +1218,7 @@ def test_tailoring_citation_contract_is_exact_and_target_specific(tmp_path):
     }
     assert summary_citations[1]["source_field"] in CandidateProfile.model_fields
 
-    bullet_citations = citation_contract["bullet_required_citations"]
-    bullet_one = bullet_citations["exp-primary-bullet-1"]
+    bullet_one = shape["edit_plan"]["experience_bullet_edits"][0]["citations"]
     assert bullet_one[0] == {
         "source_type": "experience_bullet",
         "source_id": "exp-primary-bullet-1",
@@ -1141,21 +1226,11 @@ def test_tailoring_citation_contract_is_exact_and_target_specific(tmp_path):
         "evidence_id": "EV-EXP-BULLET-001",
     }
     assert bullet_one[1] == default_job
-    bullet_two = bullet_citations["exp-primary-bullet-2"]
+    bullet_two = shape["edit_plan"]["experience_bullet_edits"][1]["citations"]
     assert bullet_two[0]["source_id"] == "exp-primary-bullet-2"
     assert bullet_two[0]["evidence_id"] == "EV-EXP-BULLET-002"
     assert bullet_two[1] == default_job
-
-    assert shape["edit_plan"]["professional_summary"]["citations"] == summary_citations
     assert len(shape["edit_plan"]["experience_bullet_edits"]) == 2
-    assert (
-        shape["edit_plan"]["experience_bullet_edits"][0]["citations"]
-        == bullet_one
-    )
-    assert (
-        shape["edit_plan"]["experience_bullet_edits"][1]["citations"]
-        == bullet_two
-    )
 
 
 def test_invalid_job_citation_fields_are_rejected_with_recovery(tmp_path):
@@ -1171,9 +1246,14 @@ def test_invalid_job_citation_fields_are_rejected_with_recovery(tmp_path):
         assert valid == 0
         assert invalid == 1
         recovery = json.loads(runtime.conversation[-1]["content"])
-        assert recovery["status"] == "invalid_tool_call"
+        assert recovery["type"] == "invalid_tool_call_recovery"
+        assert recovery["error_category"] == "citation"
         assert "Unknown job citation field" in recovery["error"]
         assert "citation_recovery_contract" in recovery
+        assert "required_argument_shape" not in recovery
+        assert "target_context" not in recovery
+        assert "constraints" not in recovery
+        assert len(runtime.conversation) == 3
         recovery_contract = recovery["citation_recovery_contract"]
         assert (
             recovery_contract["default_job_citation"]["source_field"]
@@ -1208,8 +1288,10 @@ def test_citation_recovery_omits_structural_template_for_citation_only_errors(
         contract,
     )
     payload = json.loads(runtime.conversation[-1]["content"])
+    assert payload["type"] == "invalid_tool_call_recovery"
     assert "citation_recovery_contract" in payload
     assert "exact_tailor_resume_structural_template" not in payload
+    assert len(runtime.conversation) == 3
 
 
 def test_tailor_with_supplied_exact_citations_executes(tmp_path, monkeypatch):
@@ -1228,3 +1310,68 @@ def test_tailor_with_supplied_exact_citations_executes(tmp_path, monkeypatch):
     assert len(
         contract["required_argument_shape"]["edit_plan"]["experience_bullet_edits"]
     ) == 2
+
+
+def test_first_tailoring_payload_is_deduplicated_and_smaller(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract = _tailoring_contract(runtime)
+    current_messages = _current_tailoring_messages(runtime, contract)
+    legacy_messages = _legacy_duplicated_tailoring_messages(runtime, contract)
+    current_size = len(json.dumps(current_messages, separators=(",", ":")))
+    legacy_size = len(json.dumps(legacy_messages, separators=(",", ":")))
+    reduction = 1 - (current_size / legacy_size)
+    assert reduction >= 0.30
+    checkpoint = json.loads(current_messages[1]["content"])
+    shape = checkpoint["next_action_contract"]["required_argument_shape"]
+    assert shape["edit_plan"]["professional_summary"]["citations"]
+    assert checkpoint["target_context"]["target_job_id"] == contract["target_job_id"]
+    assert "target_context" not in checkpoint["next_action_contract"]
+
+
+def test_missing_tool_call_stop_recovery_is_bounded(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract = _tailoring_contract(runtime)
+    runtime._apply_conversation_checkpoint(contract)
+    runtime.state.model_call_count = 6
+    response = NormalizedAssistantMessage(content="", tool_calls=[], done_reason="stop")
+    valid, invalid = runtime._execute_response_calls(response, contract)
+    assert valid == 0
+    assert invalid == 1
+    assert len(runtime.conversation) == 3
+    retry = json.loads(runtime.conversation[-1]["content"])
+    assert retry["type"] == "tool_call_retry"
+    assert retry["reason"] == "missing_tool_call"
+    assert runtime.conversation[1]["content"].count("target_context") == 1
+
+
+def test_model_call_payload_diagnostics_are_recorded_not_in_messages(tmp_path):
+    tracer = NoOpAgentTracer()
+    runtime = _runtime(
+        tmp_path,
+        ScriptedClient(
+            [NormalizedAssistantMessage(content="", tool_calls=[])]
+        ),
+        ReviewProvider("unused"),
+        tracer,
+    )
+    runtime.trace = tracer.start_trace("agent_run", run_id=runtime.run_id)
+    runtime._load_inputs()
+    assert runtime.registry is not None
+    runtime.registry.execute("filter_jobs", {"decision_summary": "Filter once."})
+    runtime.registry.execute("score_jobs", {"decision_summary": "Score once."})
+    for job_id in runtime.state.top_3_job_ids:
+        runtime.registry.execute(
+            "analyze_fit",
+            {"decision_summary": f"Analyze {job_id}.", "job_id": job_id},
+        )
+    contract = runtime._next_action_contract()
+    runtime._apply_conversation_checkpoint(contract)
+    before = runtime._serialized_conversation_char_count()
+    runtime._call_model(runtime.trace, contract)
+    generation = runtime.trace.record.observations[-1]
+    assert generation.metadata["model_message_count"] == 2
+    assert generation.metadata["serialized_message_char_count"] == before
+    assert generation.metadata["serialized_tool_schema_char_count"] > 0
+    assert generation.metadata["phase"] == "resume_tailoring"
+    assert generation.metadata["target_rank"] == 1
+    assert "model_message_count" not in runtime.conversation[-1]["content"]
