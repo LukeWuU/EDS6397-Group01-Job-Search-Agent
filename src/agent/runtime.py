@@ -8,7 +8,7 @@ import re
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -85,8 +85,8 @@ _CITATION_ERROR_MARKERS = (
     "actual evidence id",
     "requires its bullet citation",
     "requires job-posting",
-    "citation",
 )
+_TAILOR_NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?%?")
 
 
 def _word_count(value: str) -> int:
@@ -110,21 +110,16 @@ class _TailorSemanticTextEdit(BaseModel):
         return value
 
 
-class _TailorResumeTextDraftArguments(BaseModel):
-    """Compact model-facing adapter schema for assignment tool #4 tailor_resume.
-
-    This is not a sixth tool. The runtime hydrates these text-only arguments into
-    the existing full ResumeTailoringCallArguments before registry validation and
-    resume tool execution.
-    """
+class _TailorResumeTextDraftBase(BaseModel):
+    """Shared compact model-facing adapter fields for assignment tool tailor_resume."""
 
     model_config = ConfigDict(extra="forbid")
 
     decision_summary: str = Field(min_length=1, max_length=500)
     job_id: str = Field(min_length=1)
     professional_summary: _TailorSemanticTextEdit
-    experience_bullet_edits: list[_TailorSemanticTextEdit] = Field(min_length=2, max_length=2)
-    project_swap_reason: str | None = None
+    bullet_1: _TailorSemanticTextEdit
+    bullet_2: _TailorSemanticTextEdit
     plan_rationale: str = Field(min_length=1, max_length=200)
 
     @field_validator("decision_summary", "plan_rationale")
@@ -147,23 +142,18 @@ class _TailorResumeTextDraftArguments(BaseModel):
             raise ValueError("professional_summary.reason must be at most 18 words")
         return value
 
-    @field_validator("experience_bullet_edits")
+    @field_validator("bullet_1", "bullet_2")
     @classmethod
-    def validate_bullet_word_limits(
+    def validate_named_bullet_word_limits(
         cls,
-        value: list[_TailorSemanticTextEdit],
-    ) -> list[_TailorSemanticTextEdit]:
-        if len(value) != 2:
-            raise ValueError("exactly two experience_bullet_edits are required")
-        for index, edit in enumerate(value, start=1):
-            if _word_count(edit.new_text) > 32:
-                raise ValueError(
-                    f"experience_bullet_edits[{index - 1}].new_text must be at most 32 words"
-                )
-            if _word_count(edit.reason) > 18:
-                raise ValueError(
-                    f"experience_bullet_edits[{index - 1}].reason must be at most 18 words"
-                )
+        value: _TailorSemanticTextEdit,
+        info,
+    ) -> _TailorSemanticTextEdit:
+        field_name = info.field_name or "bullet"
+        if _word_count(value.new_text) > 32:
+            raise ValueError(f"{field_name}.new_text must be at most 32 words")
+        if _word_count(value.reason) > 18:
+            raise ValueError(f"{field_name}.reason must be at most 18 words")
         return value
 
     @field_validator("plan_rationale")
@@ -172,6 +162,18 @@ class _TailorResumeTextDraftArguments(BaseModel):
         if _word_count(value) > 25:
             raise ValueError("plan_rationale must be at most 25 words")
         return value
+
+
+class _TailorResumeTextDraftNoSwap(_TailorResumeTextDraftBase):
+    project_swap_reason: Literal[None] = None
+
+
+class _TailorResumeTextDraftWithSwap(_TailorResumeTextDraftBase):
+    project_swap_reason: str = Field(min_length=1, max_length=200)
+
+
+# Backward-compatible alias for tests importing the draft adapter model.
+_TailorResumeTextDraftArguments = _TailorResumeTextDraftNoSwap
 
 
 class AgentRuntimeError(Exception):
@@ -278,6 +280,9 @@ class JobSearchAgentRuntime:
         if contract["allowed_tool"] == "tailor_resume":
             diagnostics["model_argument_mode"] = "tailor_resume_text_draft"
             diagnostics["hydration_applied"] = False
+            diagnostics["semantic_bullet_slot_mode"] = "named"
+            diagnostics["required_role_phrase"] = contract.get("required_role_phrase")
+            diagnostics["project_swap_required"] = contract.get("project_swap_required")
         return diagnostics
 
     def _build_workflow_checkpoint(self, contract: dict[str, Any]) -> dict[str, Any]:
@@ -375,13 +380,148 @@ class JobSearchAgentRuntime:
         if length_limited:
             self._report_progress("Model completion: length limit")
 
-    def _report_citation_rejection_progress(self) -> None:
+    def _report_validation_rejection_progress(
+        self,
+        error: str,
+        contract: dict[str, Any],
+    ) -> None:
         assert self.state is not None
+        category = (
+            self._classify_tailor_rejection(error)
+            if contract.get("allowed_tool") == "tailor_resume"
+            else "validation"
+        )
         self._report_progress(
             f"Model call {self.state.model_call_count}: "
             "tool call rejected by validation"
         )
-        self._report_progress("Validation category: citation")
+        self._report_progress(f"Validation category: {category}")
+        if self._last_generation_span is not None:
+            existing = self._last_generation_span.record.metadata or {}
+            metadata = {**existing, "rejected_category": category}
+            slot = self._infer_rejected_bullet_slot(error)
+            if slot is not None:
+                metadata["rejected_bullet_slot"] = slot
+            self._last_generation_span.record.metadata = metadata
+
+    @staticmethod
+    def _derive_required_role_phrase(job_title: str) -> str:
+        primary = " ".join(job_title.split("|", 1)[0].split())
+        parts = primary.split()
+        if len(parts) >= 2:
+            return " ".join(parts[:-1] + [parts[-1].lower()])
+        return primary.lower()
+
+    @staticmethod
+    def _summary_includes_role_phrase(summary_text: str, required_phrase: str) -> bool:
+        return required_phrase.casefold() in summary_text.casefold()
+
+    @staticmethod
+    def _tailor_draft_model_for_contract(
+        contract: dict[str, Any],
+    ) -> type[_TailorResumeTextDraftBase]:
+        if contract.get("project_swap_required"):
+            return _TailorResumeTextDraftWithSwap
+        return _TailorResumeTextDraftNoSwap
+
+    def _parse_tailor_draft_arguments(
+        self,
+        arguments: dict[str, Any],
+        contract: dict[str, Any],
+    ) -> _TailorResumeTextDraftBase:
+        draft_model = self._tailor_draft_model_for_contract(contract)
+        try:
+            return draft_model.model_validate(arguments)
+        except ValidationError as exc:
+            raise ToolArgumentsError(
+                f"Tailor resume draft schema rejection: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _classify_tailor_rejection(error: str) -> str:
+        lowered = error.casefold()
+        if "draft schema rejection" in lowered:
+            return "draft_schema"
+        if "draft job_id mismatch" in lowered or "outer job_id must equal" in lowered:
+            return "target_job"
+        if "hydration rejection" in lowered:
+            return "hydration"
+        if "must explicitly include the role phrase" in lowered:
+            return "semantic_text"
+        if "must clearly align with the actual job role" in lowered:
+            return "semantic_text"
+        if (
+            "genuine-gap" in lowered
+            or "unsupported numeric" in lowered
+            or "introduces capability not supported" in lowered
+        ):
+            return "evidence"
+        if any(marker in lowered for marker in _CITATION_ERROR_MARKERS):
+            return "citation"
+        if "rejected the requested call" in lowered:
+            return "tool_execution"
+        if "protected" in lowered or "one-page" in lowered or "one page" in lowered:
+            return "tool_execution"
+        return "validation"
+
+    def _infer_rejected_bullet_slot(self, error: str) -> str | None:
+        bullets = self._editable_tailoring_bullets()[:2]
+        for index, bullet in enumerate(bullets, start=1):
+            if bullet.bullet_id in error:
+                return f"bullet_{index}"
+        lowered = error.casefold()
+        if "bullet_1" in lowered:
+            return "bullet_1"
+        if "bullet_2" in lowered:
+            return "bullet_2"
+        return None
+
+    def _validate_hydrated_tailor_semantics(
+        self,
+        hydrated_call: NormalizedToolCall,
+        contract: dict[str, Any],
+    ) -> None:
+        edit_plan = hydrated_call.arguments.get("edit_plan")
+        if not isinstance(edit_plan, dict):
+            return
+        summary = edit_plan.get("professional_summary")
+        if not isinstance(summary, dict):
+            return
+        summary_text = summary.get("new_text", "")
+        required_phrase = contract.get("required_role_phrase")
+        if not isinstance(required_phrase, str) or not required_phrase:
+            assert self.registry is not None
+            target_job_id = contract.get("target_job_id")
+            if target_job_id is None:
+                return
+            required_phrase = self._derive_required_role_phrase(
+                self.registry._job(target_job_id).title
+            )
+        if not self._summary_includes_role_phrase(summary_text, required_phrase):
+            raise ToolArgumentsError(
+                "Tailor resume semantic rejection: the professional summary must "
+                f'explicitly include the role phrase "{required_phrase}".'
+            )
+
+    def _tailoring_bullet_slot_source(self, bullet: ExperienceBullet) -> dict[str, Any]:
+        assert self.registry is not None
+        evidence_descriptions: list[str] = []
+        allowed_numeric: set[str] = set(_TAILOR_NUMBER_PATTERN.findall(bullet.text))
+        for evidence_id in bullet.evidence_ids:
+            record = self.registry.bundle.get_evidence(evidence_id)
+            if record is None:
+                continue
+            evidence_descriptions.append(record.claim)
+            allowed_numeric.update(_TAILOR_NUMBER_PATTERN.findall(record.claim))
+        return {
+            "current_text": bullet.text,
+            "evidence_description": (
+                "; ".join(evidence_descriptions)
+                if evidence_descriptions
+                else "Primary experience bullet evidence."
+            ),
+            "allowed_numeric_claims": sorted(allowed_numeric),
+        }
 
     @staticmethod
     def _is_citation_error(error: str) -> bool:
@@ -500,10 +640,8 @@ class JobSearchAgentRuntime:
                 "new_text": "<tailored summary>",
                 "reason": "<reason>",
             },
-            "experience_bullet_edits": [
-                {"new_text": "<tailored bullet 1 text>", "reason": "<reason>"},
-                {"new_text": "<tailored bullet 2 text>", "reason": "<reason>"},
-            ],
+            "bullet_1": {"new_text": "<tailored bullet 1 text>", "reason": "<reason>"},
+            "bullet_2": {"new_text": "<tailored bullet 2 text>", "reason": "<reason>"},
             "project_swap_reason": "<swap reason>" if has_project_swap else None,
             "plan_rationale": "<concise rationale>",
         }
@@ -516,6 +654,7 @@ class JobSearchAgentRuntime:
         allowed_tool = contract["allowed_tool"]
         if allowed_tool != "tailor_resume":
             return self.registry.model_schemas([allowed_tool])
+        draft_model = self._tailor_draft_model_for_contract(contract)
         return [
             {
                 "type": "function",
@@ -524,7 +663,7 @@ class JobSearchAgentRuntime:
                     "description": AssignmentToolRegistry._DESCRIPTIONS[
                         "tailor_resume"
                     ],
-                    "parameters": _TailorResumeTextDraftArguments.model_json_schema(),
+                    "parameters": draft_model.model_json_schema(),
                 },
             }
         ]
@@ -582,11 +721,9 @@ class JobSearchAgentRuntime:
                 "Tailor resume hydration rejection: missing deterministic target job"
             )
         try:
-            draft = _TailorResumeTextDraftArguments.model_validate(call.arguments)
-        except ValidationError as exc:
-            raise ToolArgumentsError(
-                f"Tailor resume draft schema rejection: {exc}"
-            ) from exc
+            draft = self._parse_tailor_draft_arguments(call.arguments, contract)
+        except ToolArgumentsError:
+            raise
         if draft.job_id != target_job_id:
             raise StateInvariantError(
                 "Tailor resume draft job_id mismatch: expected "
@@ -639,8 +776,16 @@ class JobSearchAgentRuntime:
                 "experience_bullet_edits": [
                     {
                         "bullet_id": bullet.bullet_id,
-                        "new_text": draft.experience_bullet_edits[index].new_text,
-                        "reason": draft.experience_bullet_edits[index].reason,
+                        "new_text": (
+                            draft.bullet_1.new_text
+                            if index == 0
+                            else draft.bullet_2.new_text
+                        ),
+                        "reason": (
+                            draft.bullet_1.reason
+                            if index == 0
+                            else draft.bullet_2.reason
+                        ),
                         "citations": copy.deepcopy(
                             citation_contract["bullet_required_citations"][
                                 bullet.bullet_id
@@ -678,11 +823,14 @@ class JobSearchAgentRuntime:
         )
         diagnostics = {
             "model_argument_mode": "tailor_resume_text_draft",
+            "semantic_bullet_slot_mode": "named",
             "raw_model_argument_char_count": raw_size,
             "hydrated_argument_char_count": hydrated_size,
             "hydration_applied": True,
             "phase": contract["phase"],
             "target_rank": contract.get("target_rank"),
+            "required_role_phrase": contract.get("required_role_phrase"),
+            "project_swap_required": contract.get("project_swap_required"),
         }
         if self._last_generation_span is not None:
             existing = self._last_generation_span.record.metadata or {}
@@ -693,28 +841,7 @@ class JobSearchAgentRuntime:
 
     @staticmethod
     def _is_semantic_text_recovery_error(error: str) -> bool:
-        lowered = error.casefold()
-        if "draft schema rejection" in lowered or "hydration rejection" in lowered:
-            return False
-        if "draft job_id mismatch" in lowered:
-            return False
-        return any(
-            marker in lowered
-            for marker in (
-                "resume evidence",
-                "resumeeditplan",
-                "genuine-gap",
-                "metric",
-                "protected",
-                "unsupported",
-                "rejected the requested call",
-                "requires its bullet citation",
-                "requires job-posting",
-                "unknown job citation field",
-                "unknown candidate profile",
-                "unknown experience bullet",
-            )
-        )
+        return JobSearchAgentRuntime._classify_tailor_rejection(error) == "semantic_text"
 
     @property
     def model_name(self) -> str:
@@ -804,14 +931,9 @@ class JobSearchAgentRuntime:
         assert self.registry is not None
         analysis = self.state.fit_analyses[job_id]
         job = self.registry._job(job_id)
-        profile = self.registry.bundle.profile
-        editable_bullets = [
-            {
-                "bullet_id": bullet.bullet_id,
-                "text": bullet.text,
-                "evidence_ids": list(bullet.evidence_ids),
-            }
-            for bullet in self._editable_tailoring_bullets()[:2]
+        editable_bullets = self._editable_tailoring_bullets()[:2]
+        bullet_sources = [
+            self._tailoring_bullet_slot_source(bullet) for bullet in editable_bullets
         ]
         relevant_skills = [
             *analysis.core_skills.aligned_skills,
@@ -842,6 +964,8 @@ class JobSearchAgentRuntime:
             "rank": self._target_rank(job_id),
             "title": job.title,
             "company": job.company,
+            "required_role_phrase": self._derive_required_role_phrase(job.title),
+            "project_swap_required": analysis.projects.swap_suggestion is not None,
             "aligned_skills": analysis.core_skills.aligned_skills,
             "evidenced_elsewhere_skills": (
                 analysis.core_skills.evidenced_elsewhere_skills
@@ -852,7 +976,8 @@ class JobSearchAgentRuntime:
                 if analysis.projects.swap_suggestion
                 else None
             ),
-            "editable_experience_bullets": editable_bullets,
+            "bullet_1_source": bullet_sources[0] if len(bullet_sources) > 0 else None,
+            "bullet_2_source": bullet_sources[1] if len(bullet_sources) > 1 else None,
             "current_professional_summary": self._current_professional_summary(job_id),
             "relevant_master_skills": relevant_master_skills,
             "current_memory_facts": [
@@ -986,6 +1111,7 @@ class JobSearchAgentRuntime:
         elif allowed_tool == "tailor_resume":
             assert target_job_id is not None
             analysis = state.fit_analyses[target_job_id]
+            job = self.registry._job(target_job_id)
             expected_swap = analysis.projects.swap_suggestion
             target_context = self._tailoring_context(
                 target_job_id,
@@ -995,6 +1121,8 @@ class JobSearchAgentRuntime:
                 target_job_id,
                 has_project_swap=expected_swap is not None,
             )
+            required_role_phrase = self._derive_required_role_phrase(job.title)
+            project_swap_required = expected_swap is not None
             constraints = [
                 item.replace("TARGET_JOB_ID", target_job_id)
                 for item in TAILOR_RESUME_NORMAL_CONSTRAINTS
@@ -1020,7 +1148,7 @@ class JobSearchAgentRuntime:
             ] + list(COVER_LETTER_PLAN_LIMITS)
             target_context = self._cover_letter_context(target_job_id)
 
-        return {
+        contract: dict[str, Any] = {
             "phase": phase,
             "allowed_tool": allowed_tool,
             "target_job_id": target_job_id,
@@ -1031,6 +1159,16 @@ class JobSearchAgentRuntime:
             "constraints": constraints,
             "target_context": target_context,
         }
+        if allowed_tool == "tailor_resume":
+            assert target_job_id is not None
+            job = self.registry._job(target_job_id)
+            contract["required_role_phrase"] = self._derive_required_role_phrase(
+                job.title
+            )
+            contract["project_swap_required"] = (
+                state.fit_analyses[target_job_id].projects.swap_suggestion is not None
+            )
+        return contract
 
     def run(self) -> AgentRunResult:
         """Load inputs, run one continuous conversation, and package outputs."""
@@ -1327,6 +1465,7 @@ class JobSearchAgentRuntime:
                     execution_call,
                     contract,
                 )
+                self._validate_hydrated_tailor_semantics(execution_call, contract)
             self._validate_call_for_contract(execution_call, contract)
             baseline_arguments = self.registry.parse_arguments(
                 execution_call.name,
@@ -1340,8 +1479,8 @@ class JobSearchAgentRuntime:
             self._execute_model_tool_call(execution_call)
         except (StateInvariantError, ToolRegistryError) as exc:
             error = str(exc)
-            if self._is_semantic_text_recovery_error(error):
-                self._report_citation_rejection_progress()
+            if contract["allowed_tool"] == "tailor_resume":
+                self._report_validation_rejection_progress(error, contract)
             self._record_invalid(tool_call=raw_call, error=error)
             self._rebuild_bounded_recovery(
                 contract,
@@ -1430,25 +1569,34 @@ class JobSearchAgentRuntime:
             "decision_summary",
             "job_id",
             "professional_summary",
-            "experience_bullet_edits",
+            "bullet_1",
+            "bullet_2",
             "project_swap_reason",
             "plan_rationale",
         }
         outer_keys = set(call.arguments)
         summary = call.arguments.get("professional_summary")
         summary_keys = set(summary) if isinstance(summary, dict) else set()
-        bullets = call.arguments.get("experience_bullet_edits")
-        bullet_count = len(bullets) if isinstance(bullets, list) else 0
         invalid_bullet_counts: list[str] = []
-        if bullet_count != 2:
-            invalid_bullet_counts.append(str(bullet_count))
+        if "experience_bullet_edits" in outer_keys:
+            invalid_bullet_counts.append("experience_bullet_edits")
+        for slot in ("bullet_1", "bullet_2"):
+            if slot not in outer_keys:
+                invalid_bullet_counts.append(f"missing_{slot}")
         return {
             "missing_fields": sorted(expected - outer_keys),
             "extra_fields": sorted(outer_keys - expected),
             "misplaced_fields": sorted(
                 key
                 for key in outer_keys
-                if key in {"edit_plan", "plan", "citations", "skill_section_edits"}
+                if key
+                in {
+                    "edit_plan",
+                    "plan",
+                    "citations",
+                    "skill_section_edits",
+                    "experience_bullet_edits",
+                }
             ),
             "invalid_bullet_counts": invalid_bullet_counts,
             "summary_missing_fields": sorted(
@@ -1624,6 +1772,7 @@ class JobSearchAgentRuntime:
     ) -> dict[str, Any]:
         if contract["allowed_tool"] == "tailor_resume":
             diagnostics = self._draft_argument_diagnostics(tool_call)
+            error_category = self._classify_tailor_rejection(error)
             draft_issues = (
                 diagnostics["missing_fields"]
                 or diagnostics["extra_fields"]
@@ -1631,26 +1780,45 @@ class JobSearchAgentRuntime:
                 or diagnostics["invalid_bullet_counts"]
                 or diagnostics.get("summary_missing_fields")
             )
-            if self._is_semantic_text_recovery_error(error):
-                error_category = "semantic_text"
-                instruction = (
-                    "Revise only the semantic text fields. Python will supply "
-                    "the same exact IDs and citations on retry."
-                )
-            elif "draft schema rejection" in error.casefold() or draft_issues:
+            if draft_issues and error_category == "validation":
                 error_category = "draft_schema"
+            if error_category == "semantic_text":
+                required_phrase = contract.get("required_role_phrase")
+                if "must explicitly include the role phrase" in error and required_phrase:
+                    instruction = (
+                        f'The professional summary must explicitly include the role '
+                        f'phrase "{required_phrase}". Revise semantic text only.'
+                    )
+                else:
+                    instruction = (
+                        "Revise only the semantic text fields. Python will supply "
+                        "the same exact IDs and citations on retry."
+                    )
+            elif error_category == "evidence":
+                slot = self._infer_rejected_bullet_slot(error)
+                if slot:
+                    instruction = (
+                        f"Revise {slot} only from {slot}_source. Do not transfer "
+                        "metrics, technologies, outcomes, or claims between "
+                        "bullet_1 and bullet_2."
+                    )
+                else:
+                    instruction = (
+                        "Revise only the semantic text fields. Python will supply "
+                        "the same exact IDs and citations on retry."
+                    )
+            elif error_category == "hydration" and "project_swap_reason" in error:
                 instruction = (
-                    "Return exactly one corrected compact tailor_resume call "
-                    "using the checkpoint."
+                    "project_swap_reason must be a nonempty string when Fit "
+                    "Analysis requires a project swap. Python supplies the exact "
+                    "project IDs."
                 )
-            elif "hydration rejection" in error.casefold() or "job_id mismatch" in error.casefold():
-                error_category = "hydration"
+            elif error_category in {"draft_schema", "hydration", "target_job"}:
                 instruction = (
                     "Return exactly one corrected compact tailor_resume call "
                     "using the checkpoint."
                 )
             else:
-                error_category = "validation"
                 instruction = (
                     "Return exactly one corrected compact tailor_resume call "
                     "using the checkpoint."
@@ -1663,7 +1831,22 @@ class JobSearchAgentRuntime:
                 "error": error[:500],
                 "instruction": instruction,
             }
-            if error_category in {"draft_schema", "hydration", "validation"} and draft_issues:
+            if error_category == "semantic_text" and contract.get("required_role_phrase"):
+                payload["required_role_phrase"] = contract["required_role_phrase"]
+            if error_category == "evidence":
+                slot = self._infer_rejected_bullet_slot(error)
+                if slot:
+                    payload["rejected_bullet_slot"] = slot
+                    target_context = contract.get("target_context") or {}
+                    slot_source = target_context.get(f"{slot}_source")
+                    if slot_source is not None:
+                        payload[f"{slot}_source"] = slot_source
+            if error_category == "hydration" and "project_swap_reason" in error:
+                payload["project_swap_required"] = contract.get(
+                    "project_swap_required",
+                    True,
+                )
+            if error_category in {"draft_schema", "hydration", "target_job", "validation"} and draft_issues:
                 payload["field_diagnostics"] = diagnostics
                 payload["required_argument_shape"] = contract["required_argument_shape"]
             return payload
@@ -2000,6 +2183,7 @@ class JobSearchAgentRuntime:
                         execution_call,
                         contract,
                     )
+                    self._validate_hydrated_tailor_semantics(execution_call, contract)
                     self._validate_call_for_contract(execution_call, contract)
                     self.registry.parse_arguments(
                         execution_call.name,
@@ -2014,8 +2198,7 @@ class JobSearchAgentRuntime:
                     )
                 except (StateInvariantError, ToolRegistryError) as exc:
                     error = str(exc)
-                    if self._is_semantic_text_recovery_error(error):
-                        self._report_citation_rejection_progress()
+                    self._report_validation_rejection_progress(error, contract)
                     self._record_invalid(tool_call=raw_call, error=error)
                     self._rebuild_bounded_recovery(
                         contract,

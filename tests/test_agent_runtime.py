@@ -18,7 +18,8 @@ from src.agent.client import (
 from src.agent.runtime import (
     AgentLoopLimitError,
     JobSearchAgentRuntime,
-    _TailorResumeTextDraftArguments,
+    _TailorResumeTextDraftNoSwap,
+    _TailorResumeTextDraftWithSwap,
 )
 from src.agent.prompts import TAILOR_RESUME_CONSTRAINTS, TAILOR_RESUME_PLAN_LIMITS
 from src.agent.state import AgentPhase, StateInvariantError
@@ -185,10 +186,14 @@ def _compact_draft_from_plan(
             "new_text": plan.professional_summary.new_text,
             "reason": plan.professional_summary.reason,
         },
-        "experience_bullet_edits": [
-            {"new_text": item.new_text, "reason": item.reason}
-            for item in plan.experience_bullet_edits
-        ],
+        "bullet_1": {
+            "new_text": plan.experience_bullet_edits[0].new_text,
+            "reason": plan.experience_bullet_edits[0].reason,
+        },
+        "bullet_2": {
+            "new_text": plan.experience_bullet_edits[1].new_text,
+            "reason": plan.experience_bullet_edits[1].reason,
+        },
         "project_swap_reason": (
             plan.project_swap.reason if plan.project_swap is not None else None
         ),
@@ -493,8 +498,8 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     assert first_recovery["error_category"] in {"draft_schema", "validation"}
     assert "edit_plan" in first_recovery["field_diagnostics"]["extra_fields"]
     assert "outer.job_id" not in first_recovery["field_diagnostics"]["missing_fields"]
-    assert second_recovery["error_category"] == "hydration"
-    assert "job_id mismatch" in second_recovery["error"]
+    assert second_recovery["error_category"] in {"hydration", "target_job"}
+    assert "job_id mismatch" in second_recovery["error"] or "job_id" in second_recovery["error"].casefold()
     assert "edit_plan" not in first_recovery["required_argument_shape"]
     assert "citations" not in json.dumps(first_recovery["required_argument_shape"])
     assert "target_context" not in first_recovery
@@ -531,9 +536,9 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     assert first_tailoring_context["rank"] == 1
     assert first_tailoring_context["project_swap"] is None
     assert "citation_contract" not in first_tailoring_context
-    assert "required_citations" not in json.dumps(
-        first_tailoring_context["editable_experience_bullets"]
-    )
+    assert "bullet_1_source" in first_tailoring_context
+    assert "36%" in json.dumps(first_tailoring_context["bullet_2_source"])
+    assert "14%" in json.dumps(first_tailoring_context["bullet_1_source"])
     assert "target_context" not in tailoring_checkpoint["next_action_contract"]
     assert scores[1].job_id not in json.dumps(first_tailoring_context)
     assert scores[2].job_id not in json.dumps(first_tailoring_context)
@@ -545,9 +550,9 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     )
     shape = contracts[5]["required_argument_shape"]
     assert "edit_plan" not in shape
-    assert "citations" not in json.dumps(shape)
-    assert "source_type" not in json.dumps(shape)
-    assert len(shape["experience_bullet_edits"]) == 2
+    assert "bullet_1" in shape
+    assert "bullet_2" in shape
+    assert "experience_bullet_edits" not in shape
     assert set(runtime.state.fit_analyses) == {score.job_id for score in scores}
     assert runtime.registry is not None
     assert len(runtime.registry.model_schemas()) == 5
@@ -623,14 +628,20 @@ def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
     assert first_contract["target_context"]["project_swap"] is None
     assert first_contract["required_argument_shape"]["job_id"] == ids[0]
     assert "edit_plan" not in first_contract["required_argument_shape"]
-    assert len(first_contract["required_argument_shape"]["experience_bullet_edits"]) == 2
+    assert "bullet_1" in first_contract["required_argument_shape"]
+    assert "bullet_2" in first_contract["required_argument_shape"]
+    assert first_contract["required_role_phrase"] == "AI engineer"
+    assert first_contract["target_context"]["required_role_phrase"] == "AI engineer"
+    assert "bullet_1_source" in first_contract["target_context"]
+    assert "bullet_2_source" in first_contract["target_context"]
     schemas = runtime._model_schemas_for_contract(first_contract)
     assert schemas[0]["function"]["name"] == "tailor_resume"
     assert "ResumeEditPlan" not in json.dumps(schemas)
     plan_limits = " ".join(first_contract["constraints"])
     assert "Python supplies bullet IDs" in plan_limits
     assert "at most 55 words" in plan_limits
-    assert "exactly two experience_bullet_edits" in plan_limits.casefold()
+    assert "bullet_1 only from bullet_1_source" in plan_limits
+    assert "Do not transfer metrics" in plan_limits
     safety_contract = " ".join(first_contract["constraints"])
     assert "genuine-gap" in safety_contract
     assert "project_swap_reason" in safety_contract
@@ -706,16 +717,13 @@ def test_tailor_resume_draft_schema_and_hydration_validation(tmp_path):
             contract,
         )
 
-    third_bullet = {
+    extra_bullet_slot = {
         **valid_draft,
-        "experience_bullet_edits": [
-            *valid_draft["experience_bullet_edits"],
-            {"new_text": "extra", "reason": "extra"},
-        ],
+        "bullet_3": {"new_text": "extra", "reason": "extra"},
     }
     with pytest.raises(ToolArgumentsError, match="draft schema rejection"):
         runtime._hydrate_tailor_resume_call(
-            _tool("tailor_resume", third_bullet, 4),
+            _tool("tailor_resume", extra_bullet_slot, 4),
             contract,
         )
 
@@ -753,7 +761,7 @@ def test_tailor_resume_draft_schema_and_hydration_validation(tmp_path):
         )
         swap_draft = _compact_draft_from_plan(swap_plan, swap_job_id)
         swap_draft["project_swap_reason"] = None
-        with pytest.raises(ToolArgumentsError, match="hydration rejection"):
+        with pytest.raises(ToolArgumentsError, match="draft schema rejection"):
             runtime._hydrate_tailor_resume_call(
                 _tool("tailor_resume", swap_draft, 8),
                 swap_contract,
@@ -906,7 +914,8 @@ def test_tailoring_compaction_keeps_target_context_and_drops_obsolete_history(
     assert len(runtime.conversation) == 2
     assert checkpoint["type"] == "workflow_checkpoint"
     assert checkpoint["target_context"]["target_job_id"] == ids[0]
-    assert "editable_experience_bullets" in checkpoint["target_context"]
+    assert "bullet_1_source" in checkpoint["target_context"]
+    assert "bullet_2_source" in checkpoint["target_context"]
     assert ids[1] not in json.dumps(checkpoint["target_context"])
     assert "current_state" not in json.dumps(runtime.conversation)
     assert compact_size < full_size * 0.5
@@ -1056,16 +1065,17 @@ def _legacy_duplicated_tailoring_messages(runtime, contract):
     target_job_id = contract["target_job_id"]
     citation_contract = runtime._build_citation_contract(target_job_id)
     target_context = runtime._tailoring_context(target_job_id)
+    bullets = runtime._editable_tailoring_bullets()[:2]
     target_context["citation_contract"] = citation_contract
     target_context["editable_experience_bullets"] = [
         {
-            **bullet,
-            "required_citations": citation_contract["bullet_required_citations"].get(
-                bullet["bullet_id"],
-                [],
-            ),
+            "bullet_id": bullet.bullet_id,
+            "text": target_context[f"bullet_{index + 1}_source"]["current_text"],
+            "required_citations": citation_contract["bullet_required_citations"][
+                bullet.bullet_id
+            ],
         }
-        for bullet in target_context["editable_experience_bullets"]
+        for index, bullet in enumerate(bullets)
     ]
     full_shape = {
         "decision_summary": "<concise explanation>",
@@ -1134,15 +1144,34 @@ def _bad_semantic_tailor_draft(runtime):
     analysis = runtime.state.fit_analyses[job_id]
     plan = valid_resume_plan(job, analysis, runtime.registry.bundle)
     draft = _compact_draft_from_plan(plan, job_id)
-    gaps = analysis.core_skills.genuine_gaps
-    if gaps:
-        draft["professional_summary"]["new_text"] = (
-            f"AI Engineer with Python delivery and {gaps[0]} expertise."
-        )
-    else:
-        draft["experience_bullet_edits"][0]["new_text"] = (
-            "Built Python models that improved recall by 99%."
-        )
+    draft["professional_summary"]["new_text"] = (
+        "Machine learning engineer with Python and retrieval systems."
+    )
+    return contract, _tool("tailor_resume", draft, 1)
+
+
+def _transferred_metric_tailor_draft(runtime):
+    contract = _tailoring_contract(runtime)
+    assert runtime.registry is not None
+    assert runtime.state is not None
+    job_id = contract["target_job_id"]
+    job = runtime.registry._job(job_id)
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        runtime.registry.bundle,
+    )
+    plan.experience_bullet_edits[0].new_text = (
+        "Built Python and scikit-learn risk models over SQL datasets, raising "
+        "validated recall by 14% while holding the false-positive rate constant."
+    )
+    draft = _compact_draft_from_plan(plan, job_id)
+    transferred_text = draft["bullet_2"]["new_text"]
+    draft["bullet_1"]["new_text"] = transferred_text
+    draft["bullet_2"]["new_text"] = (
+        "Built Python and scikit-learn risk models over SQL datasets, raising "
+        "validated recall by 14% while holding the false-positive rate constant."
+    )
     return contract, _tool("tailor_resume", draft, 1)
 
 
@@ -1171,6 +1200,12 @@ def test_tailor_resume_model_facing_schema_constraints(tmp_path):
     schemas = runtime._model_schemas_for_contract(contract)
     assert schemas[0]["function"]["name"] == "tailor_resume"
     schema_text = json.dumps(schemas[0]["function"]["parameters"])
+    properties = schemas[0]["function"]["parameters"]["properties"]
+    assert "bullet_1" in properties
+    assert "bullet_2" in properties
+    assert "experience_bullet_edits" not in properties
+    assert "new_text" in schema_text
+    assert "reason" in schema_text
     for forbidden in (
         "citation",
         "evidence_id",
@@ -1182,37 +1217,25 @@ def test_tailor_resume_model_facing_schema_constraints(tmp_path):
         "edit_plan",
     ):
         assert forbidden not in schema_text
-    assert schemas[0]["function"]["parameters"]["properties"]["experience_bullet_edits"][
-        "maxItems"
-    ] == 2
-    assert schemas[0]["function"]["parameters"]["properties"]["experience_bullet_edits"][
-        "minItems"
-    ] == 2
     with pytest.raises(Exception):
-        _TailorResumeTextDraftArguments.model_validate(
+        _TailorResumeTextDraftNoSwap.model_validate(
             {
                 "decision_summary": "x",
                 "job_id": contract["target_job_id"],
                 "professional_summary": {"new_text": "x", "reason": "x"},
-                "experience_bullet_edits": [
-                    {"new_text": "x", "reason": "x"},
-                    {"new_text": "x", "reason": "x"},
-                    {"new_text": "x", "reason": "x"},
-                ],
+                "bullet_1": {"new_text": "x", "reason": "x"},
                 "project_swap_reason": None,
                 "plan_rationale": "x",
             }
         )
     with pytest.raises(Exception):
-        _TailorResumeTextDraftArguments.model_validate(
+        _TailorResumeTextDraftNoSwap.model_validate(
             {
                 "decision_summary": "x",
                 "job_id": contract["target_job_id"],
                 "professional_summary": {"new_text": "x", "reason": "x"},
-                "experience_bullet_edits": [
-                    {"new_text": "x", "reason": "x"},
-                    {"new_text": "x", "reason": "x"},
-                ],
+                "bullet_1": {"new_text": "x", "reason": "x"},
+                "bullet_2": {"new_text": "x", "reason": "x"},
                 "project_swap_reason": None,
                 "plan_rationale": "x",
                 "edit_plan": {},
@@ -1258,9 +1281,9 @@ def test_hydration_injects_exact_citations_and_ids(tmp_path):
         "evidence_id": None,
     }
     assert "citation_contract" not in contract["target_context"]
-    assert "required_citations" not in json.dumps(
-        contract["target_context"]["editable_experience_bullets"]
-    )
+    assert "bullet_1_source" in contract["target_context"]
+    assert "allowed_numeric_claims" in contract["target_context"]["bullet_1_source"]
+    assert "allowed_numeric_claims" in contract["target_context"]["bullet_2_source"]
 
     _, raw_call = _valid_compact_tailor_call(runtime)
     raw_snapshot = copy.deepcopy(raw_call.arguments)
@@ -1300,7 +1323,7 @@ def test_hydration_injects_exact_citations_and_ids(tmp_path):
     assert hydrated.arguments["edit_plan"]["project_swap"] is None
 
 
-def test_semantic_text_recovery_after_hydrated_evidence_failure(tmp_path):
+def test_semantic_text_recovery_after_role_phrase_failure(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
     progress: list[str] = []
     runtime.progress_callback = progress.append
@@ -1314,14 +1337,13 @@ def test_semantic_text_recovery_after_hydrated_evidence_failure(tmp_path):
     recovery = json.loads(runtime.conversation[-1]["content"])
     assert recovery["type"] == "invalid_tool_call_recovery"
     assert recovery["error_category"] == "semantic_text"
-    assert "Revise only the semantic text fields" in recovery["instruction"]
-    assert "citation_recovery_contract" not in recovery
-    assert "exact_tailor_resume_structural_template" not in recovery
+    assert recovery["required_role_phrase"] == "AI engineer"
+    assert recovery["instruction"].count('"AI engineer"') == 1
+    assert "Revise semantic text only" in recovery["instruction"]
     assert "required_argument_shape" not in recovery
     assert len(runtime.conversation) == 3
-    assert "genuine-gap" in recovery["error"].casefold() or "genuine gap" in recovery[
-        "error"
-    ].casefold()
+    assert "Validation category: semantic_text" in progress
+    assert "Validation category: citation" not in progress
 
     contract2, call2 = _valid_compact_tailor_call(runtime)
     hydrated1 = runtime._hydrate_tailor_resume_call(call, contract)
@@ -1330,10 +1352,6 @@ def test_semantic_text_recovery_after_hydrated_evidence_failure(tmp_path):
         hydrated1.arguments["edit_plan"]["professional_summary"]["citations"]
         == hydrated2.arguments["edit_plan"]["professional_summary"]["citations"]
     )
-    assert (
-        hydrated1.arguments["edit_plan"]["experience_bullet_edits"][0]["citations"]
-        == hydrated2.arguments["edit_plan"]["experience_bullet_edits"][0]["citations"]
-    )
 
 
 def test_semantic_recovery_omits_structural_template(tmp_path):
@@ -1341,12 +1359,13 @@ def test_semantic_recovery_omits_structural_template(tmp_path):
     contract, call = _bad_semantic_tailor_draft(runtime)
     runtime._append_invalid_message(
         call,
-        "Resume evidence rejection: genuine-gap skill claim",
+        'Tailor resume semantic rejection: the professional summary must explicitly include the role phrase "AI engineer".',
         contract,
     )
     payload = json.loads(runtime.conversation[-1]["content"])
     assert payload["type"] == "invalid_tool_call_recovery"
     assert payload["error_category"] == "semantic_text"
+    assert payload["required_role_phrase"] == "AI engineer"
     assert "exact_tailor_resume_structural_template" not in payload
     assert len(runtime.conversation) == 3
 
@@ -1410,7 +1429,9 @@ def test_missing_tool_call_stop_recovery_is_bounded(tmp_path):
     retry = json.loads(runtime.conversation[-1]["content"])
     assert retry["type"] == "tool_call_retry"
     assert retry["reason"] == "missing_tool_call"
-    assert runtime.conversation[1]["content"].count("target_context") == 1
+    checkpoint = json.loads(runtime.conversation[1]["content"])
+    assert "target_context" in checkpoint
+    assert "target_context" not in checkpoint["next_action_contract"]
 
 
 def test_model_call_payload_diagnostics_are_recorded_not_in_messages(tmp_path):
@@ -1444,4 +1465,136 @@ def test_model_call_payload_diagnostics_are_recorded_not_in_messages(tmp_path):
     assert generation.metadata["phase"] == "resume_tailoring"
     assert generation.metadata["target_rank"] == 1
     assert generation.metadata["model_argument_mode"] == "tailor_resume_text_draft"
+    assert generation.metadata["semantic_bullet_slot_mode"] == "named"
+    assert generation.metadata["required_role_phrase"] == "AI engineer"
     assert "model_message_count" not in runtime.conversation[-1]["content"]
+
+
+def test_required_role_phrase_validation(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract = _tailoring_contract(runtime)
+    assert runtime._derive_required_role_phrase("AI Engineer") == "AI engineer"
+    assert runtime._summary_includes_role_phrase(
+        "Experienced AI ENGINEER delivering Python systems.",
+        "AI engineer",
+    )
+    assert not runtime._summary_includes_role_phrase(
+        "Machine learning engineer with Python systems.",
+        "AI engineer",
+    )
+    _, bad_call = _bad_semantic_tailor_draft(runtime)
+    hydrated = runtime._hydrate_tailor_resume_call(bad_call, contract)
+    with pytest.raises(ToolArgumentsError, match='role phrase "AI engineer"'):
+        runtime._validate_hydrated_tailor_semantics(hydrated, contract)
+
+
+def test_bullet_slot_mapping_is_deterministic_when_semantic_text_swapped(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract, call = _transferred_metric_tailor_draft(runtime)
+    hydrated = runtime._hydrate_tailor_resume_call(call, contract)
+    edits = hydrated.arguments["edit_plan"]["experience_bullet_edits"]
+    assert edits[0]["bullet_id"] == "exp-primary-bullet-1"
+    assert edits[1]["bullet_id"] == "exp-primary-bullet-2"
+    assert "36%" in edits[0]["new_text"]
+    assert "14%" in edits[1]["new_text"]
+
+
+def test_evidence_recovery_for_transferred_metric(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
+    )
+    runtime = _runtime_at_tailoring(tmp_path)
+    progress: list[str] = []
+    runtime.progress_callback = progress.append
+    runtime.state.model_call_count = 6
+    contract, call = _transferred_metric_tailor_draft(runtime)
+    response = NormalizedAssistantMessage(tool_calls=[call])
+    valid, invalid = runtime._execute_response_calls(response, contract)
+    assert valid == 0
+    assert invalid == 1
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["error_category"] == "evidence"
+    assert recovery["rejected_bullet_slot"] == "bullet_1"
+    assert "bullet_1_source" in recovery
+    assert "bullet_2_source" not in recovery
+    assert "14%" in json.dumps(recovery["bullet_1_source"]["allowed_numeric_claims"])
+    assert "36%" in recovery["error"]
+    assert "Validation category: evidence" in progress
+    assert "Validation category: citation" not in progress
+
+
+def test_dynamic_project_swap_schema(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.state is not None
+    ids = runtime.state.top_3_job_ids
+    no_swap_contract = runtime._next_action_contract()
+    assert no_swap_contract["project_swap_required"] is False
+    with pytest.raises(ToolArgumentsError, match="draft schema rejection"):
+        runtime._parse_tailor_draft_arguments(
+            {
+                "decision_summary": "x",
+                "job_id": no_swap_contract["target_job_id"],
+                "professional_summary": {"new_text": "AI engineer x", "reason": "x"},
+                "bullet_1": {"new_text": "x", "reason": "x"},
+                "bullet_2": {"new_text": "x", "reason": "x"},
+                "project_swap_reason": "should not be accepted",
+                "plan_rationale": "x",
+            },
+            no_swap_contract,
+        )
+    runtime._parse_tailor_draft_arguments(
+        {
+            "decision_summary": "x",
+            "job_id": no_swap_contract["target_job_id"],
+            "professional_summary": {"new_text": "AI engineer x", "reason": "x"},
+            "bullet_1": {"new_text": "x", "reason": "x"},
+            "bullet_2": {"new_text": "x", "reason": "x"},
+            "project_swap_reason": None,
+            "plan_rationale": "x",
+        },
+        no_swap_contract,
+    )
+
+    swap_job_id = next(
+        job_id
+        for job_id in ids
+        if runtime.state.fit_analyses[job_id].projects.swap_suggestion is not None
+    )
+    swap_contract = runtime._next_action_contract()
+    while swap_contract["target_job_id"] != swap_job_id:
+        runtime.state.draft_resumes[swap_contract["target_job_id"]] = object()
+        swap_contract = runtime._next_action_contract()
+    assert swap_contract["project_swap_required"] is True
+    with pytest.raises(ToolArgumentsError, match="draft schema rejection"):
+        runtime._parse_tailor_draft_arguments(
+            {
+                "decision_summary": "x",
+                "job_id": swap_job_id,
+                "professional_summary": {"new_text": "AI engineer x", "reason": "x"},
+                "bullet_1": {"new_text": "x", "reason": "x"},
+                "bullet_2": {"new_text": "x", "reason": "x"},
+                "project_swap_reason": None,
+                "plan_rationale": "x",
+            },
+            swap_contract,
+        )
+    swap_draft = runtime._parse_tailor_draft_arguments(
+        {
+            "decision_summary": "x",
+            "job_id": swap_job_id,
+            "professional_summary": {"new_text": "AI engineer x", "reason": "x"},
+            "bullet_1": {"new_text": "x", "reason": "x"},
+            "bullet_2": {"new_text": "x", "reason": "x"},
+            "project_swap_reason": "Swap to stronger portfolio evidence.",
+            "plan_rationale": "x",
+        },
+        swap_contract,
+    )
+    hydrated = runtime._hydrate_tailor_resume_call(
+        _tool("tailor_resume", swap_draft.model_dump(mode="json"), 1),
+        swap_contract,
+    )
+    swap = hydrated.arguments["edit_plan"]["project_swap"]
+    expected = runtime.state.fit_analyses[swap_job_id].projects.swap_suggestion
+    assert swap["remove_project_id"] == expected.remove_project_id
+    assert swap["add_project_id"] == expected.add_project_id

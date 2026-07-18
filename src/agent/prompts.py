@@ -76,7 +76,25 @@ TAILOR_RESUME_ARGUMENT_TEMPLATE = {
 TAILOR_RESUME_NORMAL_CONSTRAINTS = [
     "Return exactly one tailor_resume tool call with semantic text fields only.",
     "job_id must equal TARGET_JOB_ID.",
-    "Provide exactly two experience_bullet_edits with new_text and reason only.",
+    "Provide bullet_1 and bullet_2 with new_text and reason only.",
+    "Write bullet_1 only from bullet_1_source.",
+    "Write bullet_2 only from bullet_2_source.",
+    (
+        "Do not transfer metrics, technologies, outcomes, or claims between "
+        "bullet_1 and bullet_2."
+    ),
+    (
+        "A number allowed for one slot is not automatically allowed for the "
+        "other."
+    ),
+    (
+        "Removing a supported metric is allowed when necessary; inventing, "
+        "transferring, or modifying a metric is not allowed."
+    ),
+    (
+        "The professional summary must explicitly include the required role "
+        "phrase from target_context.required_role_phrase."
+    ),
     "Python supplies bullet IDs, citations, project IDs, and nested structure.",
     "project_swap_reason must be null when no swap is required.",
     "project_swap_reason must be a nonempty string when Fit Analysis requires a swap.",
