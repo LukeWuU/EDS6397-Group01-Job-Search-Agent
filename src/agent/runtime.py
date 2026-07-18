@@ -10,6 +10,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
 from src.agent.client import (
     ChatModelClient,
     NormalizedAssistantMessage,
@@ -87,6 +89,91 @@ _CITATION_ERROR_MARKERS = (
 )
 
 
+def _word_count(value: str) -> int:
+    return len(value.split())
+
+
+class _TailorSemanticTextEdit(BaseModel):
+    """Model-authored resume text for one summary or bullet edit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    new_text: str = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=200)
+
+    @field_validator("new_text", "reason")
+    @classmethod
+    def strip_nonempty(cls, value: str) -> str:
+        value = " ".join(value.split())
+        if not value:
+            raise ValueError("text fields must be nonempty")
+        return value
+
+
+class _TailorResumeTextDraftArguments(BaseModel):
+    """Compact model-facing adapter schema for assignment tool #4 tailor_resume.
+
+    This is not a sixth tool. The runtime hydrates these text-only arguments into
+    the existing full ResumeTailoringCallArguments before registry validation and
+    resume tool execution.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision_summary: str = Field(min_length=1, max_length=500)
+    job_id: str = Field(min_length=1)
+    professional_summary: _TailorSemanticTextEdit
+    experience_bullet_edits: list[_TailorSemanticTextEdit] = Field(min_length=2, max_length=2)
+    project_swap_reason: str | None = None
+    plan_rationale: str = Field(min_length=1, max_length=200)
+
+    @field_validator("decision_summary", "plan_rationale")
+    @classmethod
+    def strip_required_strings(cls, value: str) -> str:
+        value = " ".join(value.split())
+        if not value:
+            raise ValueError("required string fields must be nonempty")
+        return value
+
+    @field_validator("professional_summary")
+    @classmethod
+    def validate_summary_word_limit(
+        cls,
+        value: _TailorSemanticTextEdit,
+    ) -> _TailorSemanticTextEdit:
+        if _word_count(value.new_text) > 55:
+            raise ValueError("professional_summary.new_text must be at most 55 words")
+        if _word_count(value.reason) > 18:
+            raise ValueError("professional_summary.reason must be at most 18 words")
+        return value
+
+    @field_validator("experience_bullet_edits")
+    @classmethod
+    def validate_bullet_word_limits(
+        cls,
+        value: list[_TailorSemanticTextEdit],
+    ) -> list[_TailorSemanticTextEdit]:
+        if len(value) != 2:
+            raise ValueError("exactly two experience_bullet_edits are required")
+        for index, edit in enumerate(value, start=1):
+            if _word_count(edit.new_text) > 32:
+                raise ValueError(
+                    f"experience_bullet_edits[{index - 1}].new_text must be at most 32 words"
+                )
+            if _word_count(edit.reason) > 18:
+                raise ValueError(
+                    f"experience_bullet_edits[{index - 1}].reason must be at most 18 words"
+                )
+        return value
+
+    @field_validator("plan_rationale")
+    @classmethod
+    def validate_plan_rationale_words(cls, value: str) -> str:
+        if _word_count(value) > 25:
+            raise ValueError("plan_rationale must be at most 25 words")
+        return value
+
+
 class AgentRuntimeError(Exception):
     """Base error for the one runtime."""
 
@@ -147,6 +234,7 @@ class JobSearchAgentRuntime:
         self._last_invalid_signature: str | None = None
         self._output_folders: dict[str, Path] = {}
         self._conversation_compacted = False
+        self._last_generation_span: SpanContext | None = None
 
     @staticmethod
     def _phase_needs_compaction(phase: str) -> bool:
@@ -178,7 +266,7 @@ class JobSearchAgentRuntime:
         contract: dict[str, Any],
         schemas: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        return {
+        diagnostics = {
             "model_message_count": len(self.conversation),
             "serialized_message_char_count": self._serialized_conversation_char_count(),
             "serialized_tool_schema_char_count": len(
@@ -187,6 +275,10 @@ class JobSearchAgentRuntime:
             "phase": contract["phase"],
             "target_rank": contract.get("target_rank"),
         }
+        if contract["allowed_tool"] == "tailor_resume":
+            diagnostics["model_argument_mode"] = "tailor_resume_text_draft"
+            diagnostics["hydration_applied"] = False
+        return diagnostics
 
     def _build_workflow_checkpoint(self, contract: dict[str, Any]) -> dict[str, Any]:
         assert self.state is not None
@@ -395,6 +487,235 @@ class JobSearchAgentRuntime:
             "instruction": contract["instructions"],
         }
 
+    @staticmethod
+    def _tailor_draft_required_shape(
+        target_job_id: str,
+        *,
+        has_project_swap: bool,
+    ) -> dict[str, Any]:
+        return {
+            "decision_summary": "<concise explanation>",
+            "job_id": target_job_id,
+            "professional_summary": {
+                "new_text": "<tailored summary>",
+                "reason": "<reason>",
+            },
+            "experience_bullet_edits": [
+                {"new_text": "<tailored bullet 1 text>", "reason": "<reason>"},
+                {"new_text": "<tailored bullet 2 text>", "reason": "<reason>"},
+            ],
+            "project_swap_reason": "<swap reason>" if has_project_swap else None,
+            "plan_rationale": "<concise rationale>",
+        }
+
+    def _model_schemas_for_contract(
+        self,
+        contract: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        assert self.registry is not None
+        allowed_tool = contract["allowed_tool"]
+        if allowed_tool != "tailor_resume":
+            return self.registry.model_schemas([allowed_tool])
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "tailor_resume",
+                    "description": AssignmentToolRegistry._DESCRIPTIONS[
+                        "tailor_resume"
+                    ],
+                    "parameters": _TailorResumeTextDraftArguments.model_json_schema(),
+                },
+            }
+        ]
+
+    def _build_project_swap_citations(
+        self,
+        job_id: str,
+        swap_suggestion: Any,
+    ) -> list[dict[str, Any]]:
+        assert self.registry is not None
+        bundle = self.registry.bundle
+        remove_project = next(
+            project
+            for project in bundle.all_projects()
+            if project.project_id == swap_suggestion.remove_project_id
+        )
+        add_project = next(
+            project
+            for project in bundle.all_projects()
+            if project.project_id == swap_suggestion.add_project_id
+        )
+        return [
+            self._job_posting_citation(job_id),
+            {
+                "source_type": "portfolio_project",
+                "source_id": remove_project.project_id,
+                "source_field": "project_id",
+                "evidence_id": remove_project.evidence_ids[0],
+            },
+            {
+                "source_type": "portfolio_project",
+                "source_id": add_project.project_id,
+                "source_field": "project_id",
+                "evidence_id": add_project.evidence_ids[0],
+            },
+            {
+                "source_type": "fit_analysis",
+                "source_id": job_id,
+                "source_field": "projects.swap_suggestion",
+                "supported_claim": swap_suggestion.reason,
+                "evidence_id": None,
+            },
+        ]
+
+    def _hydrate_tailor_resume_call(
+        self,
+        call: NormalizedToolCall,
+        contract: dict[str, Any],
+    ) -> NormalizedToolCall:
+        assert self.state is not None
+        assert self.registry is not None
+        target_job_id = contract.get("target_job_id")
+        if target_job_id is None:
+            raise StateInvariantError(
+                "Tailor resume hydration rejection: missing deterministic target job"
+            )
+        try:
+            draft = _TailorResumeTextDraftArguments.model_validate(call.arguments)
+        except ValidationError as exc:
+            raise ToolArgumentsError(
+                f"Tailor resume draft schema rejection: {exc}"
+            ) from exc
+        if draft.job_id != target_job_id:
+            raise StateInvariantError(
+                "Tailor resume draft job_id mismatch: expected "
+                f"{target_job_id!r}; received {draft.job_id!r}"
+            )
+        editable_bullets = self._editable_tailoring_bullets()[:2]
+        if len(editable_bullets) != 2:
+            raise AgentRuntimeError(
+                "Tailor resume hydration rejection: expected exactly two editable bullets"
+            )
+        citation_contract = self._build_citation_contract(target_job_id)
+        expected_swap = self.state.fit_analyses[
+            target_job_id
+        ].projects.swap_suggestion
+        project_swap: dict[str, Any] | None
+        if expected_swap is None:
+            if draft.project_swap_reason is not None:
+                raise ToolArgumentsError(
+                    "Tailor resume hydration rejection: project_swap_reason must "
+                    "be null when no swap is required"
+                )
+            project_swap = None
+        else:
+            if draft.project_swap_reason is None or not draft.project_swap_reason.strip():
+                raise ToolArgumentsError(
+                    "Tailor resume hydration rejection: project_swap_reason is "
+                    "required when Fit Analysis requires a swap"
+                )
+            project_swap = {
+                "remove_project_id": expected_swap.remove_project_id,
+                "add_project_id": expected_swap.add_project_id,
+                "reason": draft.project_swap_reason.strip(),
+                "citations": self._build_project_swap_citations(
+                    target_job_id,
+                    expected_swap,
+                ),
+            }
+        hydrated_arguments = {
+            "decision_summary": draft.decision_summary,
+            "job_id": target_job_id,
+            "edit_plan": {
+                "job_id": target_job_id,
+                "professional_summary": {
+                    "new_text": draft.professional_summary.new_text,
+                    "reason": draft.professional_summary.reason,
+                    "citations": copy.deepcopy(
+                        citation_contract["summary_required_citations"]
+                    ),
+                },
+                "experience_bullet_edits": [
+                    {
+                        "bullet_id": bullet.bullet_id,
+                        "new_text": draft.experience_bullet_edits[index].new_text,
+                        "reason": draft.experience_bullet_edits[index].reason,
+                        "citations": copy.deepcopy(
+                            citation_contract["bullet_required_citations"][
+                                bullet.bullet_id
+                            ]
+                        ),
+                    }
+                    for index, bullet in enumerate(editable_bullets)
+                ],
+                "skill_section_edits": [],
+                "project_swap": project_swap,
+                "plan_rationale": draft.plan_rationale,
+            },
+        }
+        return NormalizedToolCall(
+            id=call.id,
+            name=call.name,
+            arguments=hydrated_arguments,
+        )
+
+    def _record_hydration_diagnostics(
+        self,
+        raw_call: NormalizedToolCall,
+        hydrated_call: NormalizedToolCall,
+        contract: dict[str, Any],
+    ) -> None:
+        raw_size = len(
+            json.dumps(raw_call.arguments, ensure_ascii=False, separators=(",", ":"))
+        )
+        hydrated_size = len(
+            json.dumps(
+                hydrated_call.arguments,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        diagnostics = {
+            "model_argument_mode": "tailor_resume_text_draft",
+            "raw_model_argument_char_count": raw_size,
+            "hydrated_argument_char_count": hydrated_size,
+            "hydration_applied": True,
+            "phase": contract["phase"],
+            "target_rank": contract.get("target_rank"),
+        }
+        if self._last_generation_span is not None:
+            existing = self._last_generation_span.record.metadata or {}
+            self._last_generation_span.record.metadata = {
+                **existing,
+                **diagnostics,
+            }
+
+    @staticmethod
+    def _is_semantic_text_recovery_error(error: str) -> bool:
+        lowered = error.casefold()
+        if "draft schema rejection" in lowered or "hydration rejection" in lowered:
+            return False
+        if "draft job_id mismatch" in lowered:
+            return False
+        return any(
+            marker in lowered
+            for marker in (
+                "resume evidence",
+                "resumeeditplan",
+                "genuine-gap",
+                "metric",
+                "protected",
+                "unsupported",
+                "rejected the requested call",
+                "requires its bullet citation",
+                "requires job-posting",
+                "unknown job citation field",
+                "unknown candidate profile",
+                "unknown experience bullet",
+            )
+        )
+
     @property
     def model_name(self) -> str:
         return str(getattr(self.client, "model_name", self.config.ollama_model))
@@ -490,7 +811,7 @@ class JobSearchAgentRuntime:
                 "text": bullet.text,
                 "evidence_ids": list(bullet.evidence_ids),
             }
-            for bullet in self._editable_tailoring_bullets()
+            for bullet in self._editable_tailoring_bullets()[:2]
         ]
         relevant_skills = [
             *analysis.core_skills.aligned_skills,
@@ -545,55 +866,6 @@ class JobSearchAgentRuntime:
                 for fact in self.registry.memory.facts
             ],
             "revision_feedback": revision_feedback,
-        }
-
-    def _tailor_required_shape(
-        self,
-        target_job_id: str,
-        *,
-        expected_swap,
-        citation_contract: dict[str, Any],
-    ) -> dict[str, Any]:
-        summary_citations = copy.deepcopy(
-            citation_contract["summary_required_citations"]
-        )
-        bullet_citations = citation_contract["bullet_required_citations"]
-        editable_bullets = self._editable_tailoring_bullets()[:2]
-        project_swap: dict[str, Any] | None = None
-        if expected_swap is not None:
-            project_swap = {
-                "remove_project_id": expected_swap.remove_project_id,
-                "add_project_id": expected_swap.add_project_id,
-                "reason": "<reason>",
-                "citations": [
-                    copy.deepcopy(citation_contract["default_job_citation"]),
-                ],
-            }
-        return {
-            "decision_summary": "<concise explanation>",
-            "job_id": target_job_id,
-            "edit_plan": {
-                "job_id": target_job_id,
-                "professional_summary": {
-                    "new_text": "<tailored summary>",
-                    "reason": "<reason>",
-                    "citations": summary_citations,
-                },
-                "experience_bullet_edits": [
-                    {
-                        "bullet_id": bullet.bullet_id,
-                        "new_text": "<tailored bullet text>",
-                        "reason": "<reason>",
-                        "citations": copy.deepcopy(
-                            bullet_citations[bullet.bullet_id]
-                        ),
-                    }
-                    for bullet in editable_bullets
-                ],
-                "skill_section_edits": [],
-                "project_swap": project_swap,
-                "plan_rationale": "<concise rationale>",
-            },
         }
 
     def _cover_letter_context(self, job_id: str) -> dict[str, Any]:
@@ -719,11 +991,9 @@ class JobSearchAgentRuntime:
                 target_job_id,
                 revision_feedback=revision_feedback,
             )
-            citation_contract = self._build_citation_contract(target_job_id)
-            required_shape = self._tailor_required_shape(
+            required_shape = self._tailor_draft_required_shape(
                 target_job_id,
-                expected_swap=expected_swap,
-                citation_contract=citation_contract,
+                has_project_swap=expected_swap is not None,
             )
             constraints = [
                 item.replace("TARGET_JOB_ID", target_job_id)
@@ -953,7 +1223,7 @@ class JobSearchAgentRuntime:
         assert self.trace is not None
         if self.state.model_call_count >= MAX_MODEL_CALLS:
             raise AgentLoopLimitError("Maximum model-call count reached")
-        schemas = self.registry.model_schemas([contract["allowed_tool"]])
+        schemas = self._model_schemas_for_contract(contract)
         call_number = self.state.model_call_count + 1
         payload_diagnostics = self._model_call_diagnostics(contract, schemas)
         self._report_progress(self._phase_progress_message(contract))
@@ -986,6 +1256,7 @@ class JobSearchAgentRuntime:
             },
             observation_type="generation",
         ) as span:
+            self._last_generation_span = span
             response = self.client.chat(self.conversation, schemas)
             self._report_progress(f"Model call {call_number}: response received")
             self.state.model_call_count = call_number
@@ -1038,32 +1309,48 @@ class JobSearchAgentRuntime:
                 tool_call=call,
                 length_limited=length_limited,
             )
+            self._last_generation_span = None
             return 0, 1
 
-        call = response.tool_calls[0]
+        raw_call = response.tool_calls[0]
+        execution_call = raw_call
         try:
-            self._validate_call_for_contract(call, contract)
+            if raw_call.name != contract["allowed_tool"]:
+                raise StateInvariantError(
+                    f"Expected only {contract['allowed_tool']!r}; "
+                    f"received {raw_call.name!r}"
+                )
+            if contract["allowed_tool"] == "tailor_resume":
+                execution_call = self._hydrate_tailor_resume_call(raw_call, contract)
+                self._record_hydration_diagnostics(
+                    raw_call,
+                    execution_call,
+                    contract,
+                )
+            self._validate_call_for_contract(execution_call, contract)
             baseline_arguments = self.registry.parse_arguments(
-                call.name,
-                call.arguments,
+                execution_call.name,
+                execution_call.arguments,
             )
             self.state.validate_tool_call(
-                call.name,
+                execution_call.name,
                 job_id=getattr(baseline_arguments, "job_id", None),
             )
             self._append_assistant_message(response)
-            self._execute_model_tool_call(call)
+            self._execute_model_tool_call(execution_call)
         except (StateInvariantError, ToolRegistryError) as exc:
             error = str(exc)
-            if self._is_citation_error(error):
+            if self._is_semantic_text_recovery_error(error):
                 self._report_citation_rejection_progress()
-            self._record_invalid(tool_call=call, error=error)
+            self._record_invalid(tool_call=raw_call, error=error)
             self._rebuild_bounded_recovery(
                 contract,
                 error=error,
-                tool_call=call,
+                tool_call=raw_call,
             )
             return 0, 1
+        finally:
+            self._last_generation_span = None
         return 1, 0
 
     def _validate_call_for_contract(
@@ -1129,7 +1416,48 @@ class JobSearchAgentRuntime:
                 )
 
     @staticmethod
+    def _draft_argument_diagnostics(
+        call: NormalizedToolCall | None,
+    ) -> dict[str, Any]:
+        if call is None:
+            return {
+                "missing_fields": ["tool_call"],
+                "extra_fields": [],
+                "misplaced_fields": [],
+                "invalid_bullet_counts": [],
+            }
+        expected = {
+            "decision_summary",
+            "job_id",
+            "professional_summary",
+            "experience_bullet_edits",
+            "project_swap_reason",
+            "plan_rationale",
+        }
+        outer_keys = set(call.arguments)
+        summary = call.arguments.get("professional_summary")
+        summary_keys = set(summary) if isinstance(summary, dict) else set()
+        bullets = call.arguments.get("experience_bullet_edits")
+        bullet_count = len(bullets) if isinstance(bullets, list) else 0
+        invalid_bullet_counts: list[str] = []
+        if bullet_count != 2:
+            invalid_bullet_counts.append(str(bullet_count))
+        return {
+            "missing_fields": sorted(expected - outer_keys),
+            "extra_fields": sorted(outer_keys - expected),
+            "misplaced_fields": sorted(
+                key
+                for key in outer_keys
+                if key in {"edit_plan", "plan", "citations", "skill_section_edits"}
+            ),
+            "invalid_bullet_counts": invalid_bullet_counts,
+            "summary_missing_fields": sorted(
+                {"new_text", "reason"} - summary_keys
+            ),
+        }
+
     def _argument_diagnostics(
+        self,
         call: NormalizedToolCall | None,
         contract: dict[str, Any],
     ) -> dict[str, Any]:
@@ -1140,12 +1468,13 @@ class JobSearchAgentRuntime:
                 "misplaced_fields": [],
                 "replacement_schema_keys": [],
             }
-        if contract["allowed_tool"] != "tailor_resume":
+        if contract["allowed_tool"] == "tailor_resume":
+            draft = self._draft_argument_diagnostics(call)
             return {
-                "missing_fields": [],
-                "extra_fields": [],
-                "misplaced_fields": [],
-                "replacement_schema_keys": [],
+                "missing_fields": draft["missing_fields"],
+                "extra_fields": draft["extra_fields"],
+                "misplaced_fields": draft["misplaced_fields"],
+                "replacement_schema_keys": draft["invalid_bullet_counts"],
             }
         outer_expected = {"decision_summary", "job_id", "edit_plan"}
         plan_expected = {
@@ -1293,6 +1622,52 @@ class JobSearchAgentRuntime:
         error: str,
         contract: dict[str, Any],
     ) -> dict[str, Any]:
+        if contract["allowed_tool"] == "tailor_resume":
+            diagnostics = self._draft_argument_diagnostics(tool_call)
+            draft_issues = (
+                diagnostics["missing_fields"]
+                or diagnostics["extra_fields"]
+                or diagnostics["misplaced_fields"]
+                or diagnostics["invalid_bullet_counts"]
+                or diagnostics.get("summary_missing_fields")
+            )
+            if self._is_semantic_text_recovery_error(error):
+                error_category = "semantic_text"
+                instruction = (
+                    "Revise only the semantic text fields. Python will supply "
+                    "the same exact IDs and citations on retry."
+                )
+            elif "draft schema rejection" in error.casefold() or draft_issues:
+                error_category = "draft_schema"
+                instruction = (
+                    "Return exactly one corrected compact tailor_resume call "
+                    "using the checkpoint."
+                )
+            elif "hydration rejection" in error.casefold() or "job_id mismatch" in error.casefold():
+                error_category = "hydration"
+                instruction = (
+                    "Return exactly one corrected compact tailor_resume call "
+                    "using the checkpoint."
+                )
+            else:
+                error_category = "validation"
+                instruction = (
+                    "Return exactly one corrected compact tailor_resume call "
+                    "using the checkpoint."
+                )
+            payload: dict[str, Any] = {
+                "type": "invalid_tool_call_recovery",
+                "error_category": error_category,
+                "allowed_tool": "tailor_resume",
+                "target_job_id": contract.get("target_job_id"),
+                "error": error[:500],
+                "instruction": instruction,
+            }
+            if error_category in {"draft_schema", "hydration", "validation"} and draft_issues:
+                payload["field_diagnostics"] = diagnostics
+                payload["required_argument_shape"] = contract["required_argument_shape"]
+            return payload
+
         diagnostics = self._argument_diagnostics(tool_call, contract)
         structural_missing = [
             field
@@ -1606,32 +1981,53 @@ class JobSearchAgentRuntime:
                     tool_call=call,
                     length_limited=length_limited,
                 )
+                self._last_generation_span = None
                 invalid_turns += 1
             else:
-                call = response.tool_calls[0]
+                raw_call = response.tool_calls[0]
                 try:
-                    self._validate_call_for_contract(call, contract)
+                    if raw_call.name != contract["allowed_tool"]:
+                        raise StateInvariantError(
+                            f"Expected only {contract['allowed_tool']!r}; "
+                            f"received {raw_call.name!r}"
+                        )
+                    execution_call = self._hydrate_tailor_resume_call(
+                        raw_call,
+                        contract,
+                    )
+                    self._record_hydration_diagnostics(
+                        raw_call,
+                        execution_call,
+                        contract,
+                    )
+                    self._validate_call_for_contract(execution_call, contract)
+                    self.registry.parse_arguments(
+                        execution_call.name,
+                        execution_call.arguments,
+                    )
                     self._append_assistant_message(response)
                     outcome = self._execute_model_tool_call(
-                        call,
+                        execution_call,
                         revision_round=next_revision_round,
                         review_feedback=review_comments,
                         trace_parent=trace_parent,
                     )
                 except (StateInvariantError, ToolRegistryError) as exc:
                     error = str(exc)
-                    if self._is_citation_error(error):
+                    if self._is_semantic_text_recovery_error(error):
                         self._report_citation_rejection_progress()
-                    self._record_invalid(tool_call=call, error=error)
+                    self._record_invalid(tool_call=raw_call, error=error)
                     self._rebuild_bounded_recovery(
                         contract,
                         error=error,
-                        tool_call=call,
+                        tool_call=raw_call,
                     )
                     invalid_turns += 1
                 else:
                     self.state.consecutive_invalid_call_count = 0
                     return outcome.result
+                finally:
+                    self._last_generation_span = None
             self.state.consecutive_invalid_call_count += 1
             if invalid_turns >= MAX_CONSECUTIVE_INVALID_TURNS:
                 raise AgentLoopLimitError(

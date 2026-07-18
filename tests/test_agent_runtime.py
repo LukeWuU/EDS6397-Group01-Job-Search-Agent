@@ -15,10 +15,14 @@ from src.agent.client import (
     NormalizedAssistantMessage,
     NormalizedToolCall,
 )
-from src.agent.runtime import AgentLoopLimitError, JobSearchAgentRuntime
+from src.agent.runtime import (
+    AgentLoopLimitError,
+    JobSearchAgentRuntime,
+    _TailorResumeTextDraftArguments,
+)
 from src.agent.prompts import TAILOR_RESUME_CONSTRAINTS, TAILOR_RESUME_PLAN_LIMITS
 from src.agent.state import AgentPhase, StateInvariantError
-from src.agent.tool_registry import ToolArgumentsError
+from src.agent.tool_registry import AssignmentToolRegistry, ToolArgumentsError
 from src.config import AppConfig
 from src.observability.tracing import LangfuseAgentTracer, NoOpAgentTracer
 from src.services.candidate_loader import load_candidate_bundle
@@ -168,6 +172,30 @@ def _workflow_plans():
     return bundle, scores, resume_plans, cover_plans
 
 
+def _compact_draft_from_plan(
+    plan,
+    job_id: str,
+    *,
+    decision_summary: str = "Create draft.",
+):
+    return {
+        "decision_summary": decision_summary,
+        "job_id": job_id,
+        "professional_summary": {
+            "new_text": plan.professional_summary.new_text,
+            "reason": plan.professional_summary.reason,
+        },
+        "experience_bullet_edits": [
+            {"new_text": item.new_text, "reason": item.reason}
+            for item in plan.experience_bullet_edits
+        ],
+        "project_swap_reason": (
+            plan.project_swap.reason if plan.project_swap is not None else None
+        ),
+        "plan_rationale": plan.plan_rationale,
+    }
+
+
 def _responses(
     scores,
     resume_plans,
@@ -216,6 +244,11 @@ def _responses(
         for index, job_id in enumerate(ids)
     )
     if malformed_tailoring:
+        valid_compact = _compact_draft_from_plan(
+            resume_plans[ids[0]],
+            ids[0],
+            decision_summary="Use an incorrect generic plan.",
+        )
         responses.extend(
             [
                 NormalizedAssistantMessage(
@@ -241,25 +274,9 @@ def _responses(
                         _tool(
                             "tailor_resume",
                             {
-                                "decision_summary": "Use incorrect flattened fields.",
-                                "job_id": ids[0],
-                                "edit_plan": {
-                                    "job_id": ids[0],
-                                    "professional_summary": resume_plans[
-                                        ids[0]
-                                    ].professional_summary.model_dump(mode="json"),
-                                    "project_swap": resume_plans[
-                                        ids[1]
-                                    ].project_swap.model_dump(mode="json"),
-                                },
-                                "experience_bullet_edits": [
-                                    item.model_dump(mode="json")
-                                    for item in resume_plans[
-                                        ids[0]
-                                    ].experience_bullet_edits
-                                ],
-                                "plan_rationale": "Incorrectly flattened.",
-                                "project_swap": None,
+                                **valid_compact,
+                                "job_id": ids[1],
+                                "decision_summary": "Use the wrong target job.",
                             },
                             21,
                         )
@@ -272,13 +289,13 @@ def _responses(
             tool_calls=[
                 _tool(
                     "tailor_resume",
-                    {
-                        "job_id": job_id,
-                        "edit_plan": resume_plans[job_id].model_dump(mode="json"),
-                        "decision_summary": (
+                    _compact_draft_from_plan(
+                        resume_plans[job_id],
+                        job_id,
+                        decision_summary=(
                             f"Create revision-zero draft for {job_id}."
                         ),
-                    },
+                    ),
                     30 + index,
                 )
             ]
@@ -290,13 +307,13 @@ def _responses(
             tool_calls=[
                 _tool(
                     "tailor_resume",
-                    {
-                        "job_id": ids[0],
-                        "edit_plan": resume_plans[ids[0]].model_dump(mode="json"),
-                        "decision_summary": (
+                    _compact_draft_from_plan(
+                        resume_plans[ids[0]],
+                        ids[0],
+                        decision_summary=(
                             f"Revise rejected resume {ids[0]} using review feedback."
                         ),
-                    },
+                    ),
                     40,
                 )
             ]
@@ -473,22 +490,16 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     assert first_recovery["type"] == "invalid_tool_call_recovery"
     assert first_recovery["allowed_tool"] == "tailor_resume"
     assert first_recovery["target_job_id"] == scores[0].job_id
-    assert set(first_recovery["field_diagnostics"]["replacement_schema_keys"]) == {
-        "education",
-        "experience",
-        "projects",
-        "skills",
-    }
+    assert first_recovery["error_category"] in {"draft_schema", "validation"}
+    assert "edit_plan" in first_recovery["field_diagnostics"]["extra_fields"]
     assert "outer.job_id" not in first_recovery["field_diagnostics"]["missing_fields"]
-    assert set(second_recovery["field_diagnostics"]["misplaced_fields"]) == {
-        "experience_bullet_edits",
-        "plan_rationale",
-        "project_swap",
-    }
-    assert "project_swap must be null" in second_recovery["error"]
-    assert "required_argument_shape" not in first_recovery
+    assert second_recovery["error_category"] == "hydration"
+    assert "job_id mismatch" in second_recovery["error"]
+    assert "edit_plan" not in first_recovery["required_argument_shape"]
+    assert "citations" not in json.dumps(first_recovery["required_argument_shape"])
     assert "target_context" not in first_recovery
     assert "constraints" not in first_recovery
+    assert "exact_tailor_resume_structural_template" not in first_recovery
     first_checkpoint = json.loads(client.calls[6]["messages"][1]["content"])
     assert first_checkpoint["target_context"]["project_swap"] is None
     contracts = []
@@ -533,8 +544,10 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
         tailoring_checkpoint
     )
     shape = contracts[5]["required_argument_shape"]
-    assert shape["edit_plan"]["professional_summary"]["citations"]
-    assert len(first_tailoring_messages) == 2
+    assert "edit_plan" not in shape
+    assert "citations" not in json.dumps(shape)
+    assert "source_type" not in json.dumps(shape)
+    assert len(shape["experience_bullet_edits"]) == 2
     assert set(runtime.state.fit_analyses) == {score.job_id for score in scores}
     assert runtime.registry is not None
     assert len(runtime.registry.model_schemas()) == 5
@@ -609,22 +622,18 @@ def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
     assert first_contract["initial_draft"] is True
     assert first_contract["target_context"]["project_swap"] is None
     assert first_contract["required_argument_shape"]["job_id"] == ids[0]
-    assert (
-        first_contract["required_argument_shape"]["edit_plan"]["job_id"]
-        == ids[0]
-    )
-    assert len(
-        first_contract["required_argument_shape"]["edit_plan"][
-            "experience_bullet_edits"
-        ]
-    ) == 2
+    assert "edit_plan" not in first_contract["required_argument_shape"]
+    assert len(first_contract["required_argument_shape"]["experience_bullet_edits"]) == 2
+    schemas = runtime._model_schemas_for_contract(first_contract)
+    assert schemas[0]["function"]["name"] == "tailor_resume"
+    assert "ResumeEditPlan" not in json.dumps(schemas)
     plan_limits = " ".join(first_contract["constraints"])
-    assert "Copy citation identity objects" in plan_limits
+    assert "Python supplies bullet IDs" in plan_limits
     assert "at most 55 words" in plan_limits
-    assert "Exactly two different editable experience bullet IDs" in plan_limits
+    assert "exactly two experience_bullet_edits" in plan_limits.casefold()
     safety_contract = " ".join(first_contract["constraints"])
     assert "genuine-gap" in safety_contract
-    assert "project_swap must match" in safety_contract
+    assert "project_swap_reason" in safety_contract
 
     complete_analyses = dict(runtime.state.fit_analyses)
     runtime.state.fit_analyses = {
@@ -656,9 +665,7 @@ def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
     )
 
 
-def test_tailor_resume_malformed_nesting_targets_and_cross_job_swap_are_rejected(
-    tmp_path,
-):
+def test_tailor_resume_draft_schema_and_hydration_validation(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
     assert runtime.state is not None
     assert runtime.registry is not None
@@ -669,126 +676,88 @@ def test_tailor_resume_malformed_nesting_targets_and_cross_job_swap_are_rejected
         job,
         runtime.state.fit_analyses[ids[0]],
         runtime.registry.bundle,
-    ).model_dump(mode="json")
-    valid_arguments = {
-        "decision_summary": "Create the first deterministic draft.",
-        "job_id": ids[0],
-        "edit_plan": valid_plan,
-    }
-    valid_call = _tool("tailor_resume", valid_arguments, 1)
-    runtime._validate_call_for_contract(valid_call, contract)
-    parsed = runtime.registry.parse_arguments("tailor_resume", valid_arguments)
+    )
+    valid_draft = _compact_draft_from_plan(valid_plan, ids[0])
+    raw_call = _tool("tailor_resume", valid_draft, 1)
+    hydrated = runtime._hydrate_tailor_resume_call(raw_call, contract)
+    runtime._validate_call_for_contract(hydrated, contract)
+    parsed = runtime.registry.parse_arguments("tailor_resume", hydrated.arguments)
     assert parsed.job_id == ids[0]
     assert parsed.edit_plan.job_id == ids[0]
+    assert raw_call.arguments == valid_draft
 
-    missing_outer = _tool(
-        "tailor_resume",
-        {
-            "decision_summary": "Omit the outer target.",
-            "edit_plan": valid_plan,
-        },
-        2,
-    )
-    with pytest.raises(StateInvariantError, match="Outer job_id"):
-        runtime._validate_call_for_contract(missing_outer, contract)
-    assert "outer.job_id" in runtime._argument_diagnostics(
-        missing_outer,
-        contract,
-    )["missing_fields"]
-
-    mismatched_outer = _tool(
-        "tailor_resume",
-        {**valid_arguments, "job_id": ids[1]},
-        3,
-    )
-    with pytest.raises(StateInvariantError, match="Outer job_id"):
-        runtime._validate_call_for_contract(mismatched_outer, contract)
-
-    mismatched_nested = _tool(
-        "tailor_resume",
-        {
-            **valid_arguments,
-            "edit_plan": {**valid_plan, "job_id": ids[1]},
-        },
-        4,
-    )
-    with pytest.raises(StateInvariantError, match="edit_plan.job_id"):
-        runtime._validate_call_for_contract(mismatched_nested, contract)
-
-    generic_arguments = {
-        "decision_summary": "Use generic keys.",
-        "job_id": ids[0],
-        "edit_plan": {
-            "education": [],
-            "experience": [],
-            "projects": [],
-            "skills": [],
-        },
-    }
-    with pytest.raises(ToolArgumentsError, match="professional_summary"):
-        runtime.registry.parse_arguments("tailor_resume", generic_arguments)
-    generic_diagnostics = runtime._argument_diagnostics(
-        _tool("tailor_resume", generic_arguments, 7),
-        contract,
-    )
-    assert set(generic_diagnostics["replacement_schema_keys"]) == {
-        "education",
-        "experience",
-        "projects",
-        "skills",
-    }
-
-    flattened_arguments = {
-        "decision_summary": "Flatten plan fields.",
-        "job_id": ids[0],
-        "edit_plan": {
-            "job_id": ids[0],
-            "professional_summary": valid_plan["professional_summary"],
-        },
-        "experience_bullet_edits": valid_plan["experience_bullet_edits"],
-        "project_swap": None,
-        "plan_rationale": "Misplaced.",
-    }
-    with pytest.raises(ToolArgumentsError, match="extra_forbidden"):
-        runtime.registry.parse_arguments("tailor_resume", flattened_arguments)
-    assert set(
-        runtime._argument_diagnostics(
-            _tool("tailor_resume", flattened_arguments, 8),
-            contract,
-        )["misplaced_fields"]
-    ) == {"experience_bullet_edits", "plan_rationale", "project_swap"}
-
-    later_swap = runtime.state.fit_analyses[ids[1]].projects.swap_suggestion
-    assert later_swap is not None
-    contaminated = _tool(
-        "tailor_resume",
-        {
-            **valid_arguments,
-            "edit_plan": {
-                **valid_plan,
-                "project_swap": {
-                    "remove_project_id": later_swap.remove_project_id,
-                    "add_project_id": later_swap.add_project_id,
-                    "reason": later_swap.reason,
-                    "citations": [
-                        item.model_dump(mode="json")
-                        for item in later_swap.citations
-                    ],
+    with pytest.raises(ToolArgumentsError, match="draft schema rejection"):
+        runtime._hydrate_tailor_resume_call(
+            _tool(
+                "tailor_resume",
+                {
+                    "decision_summary": "Missing required draft fields.",
+                    "job_id": ids[0],
+                    "edit_plan": {"education": []},
                 },
-            },
-        },
-        5,
-    )
-    with pytest.raises(StateInvariantError, match="must be null"):
-        runtime._validate_call_for_contract(contaminated, contract)
+                2,
+            ),
+            contract,
+        )
 
-    wrong_job = _tool(
-        "tailor_resume",
-        {**valid_arguments, "job_id": ids[1]},
-        6,
+    with pytest.raises(StateInvariantError, match="job_id mismatch"):
+        runtime._hydrate_tailor_resume_call(
+            _tool("tailor_resume", {**valid_draft, "job_id": ids[1]}, 3),
+            contract,
+        )
+
+    third_bullet = {
+        **valid_draft,
+        "experience_bullet_edits": [
+            *valid_draft["experience_bullet_edits"],
+            {"new_text": "extra", "reason": "extra"},
+        ],
+    }
+    with pytest.raises(ToolArgumentsError, match="draft schema rejection"):
+        runtime._hydrate_tailor_resume_call(
+            _tool("tailor_resume", third_bullet, 4),
+            contract,
+        )
+
+    generic_diagnostics = runtime._argument_diagnostics(
+        _tool(
+            "tailor_resume",
+            {
+                "decision_summary": "Use generic keys.",
+                "job_id": ids[0],
+                "edit_plan": {"education": []},
+            },
+            7,
+        ),
+        contract,
     )
-    with pytest.raises(StateInvariantError, match=ids[0]):
-        runtime._validate_call_for_contract(wrong_job, contract)
+    assert "edit_plan" in generic_diagnostics["extra_fields"]
+
+    hydrated_swap = runtime._hydrate_tailor_resume_call(raw_call, contract)
+    assert hydrated_swap.arguments["edit_plan"]["project_swap"] is None
+
+    swap_job_id = next(
+        job_id
+        for job_id in ids
+        if runtime.state.fit_analyses[job_id].projects.swap_suggestion is not None
+    )
+    if swap_job_id != ids[0]:
+        swap_contract = runtime._next_action_contract()
+        while swap_contract["target_job_id"] != swap_job_id:
+            runtime.state.draft_resumes[swap_contract["target_job_id"]] = object()
+            swap_contract = runtime._next_action_contract()
+        swap_plan = valid_resume_plan(
+            runtime.registry._job(swap_job_id),
+            runtime.state.fit_analyses[swap_job_id],
+            runtime.registry.bundle,
+        )
+        swap_draft = _compact_draft_from_plan(swap_plan, swap_job_id)
+        swap_draft["project_swap_reason"] = None
+        with pytest.raises(ToolArgumentsError, match="hydration rejection"):
+            runtime._hydrate_tailor_resume_call(
+                _tool("tailor_resume", swap_draft, 8),
+                swap_contract,
+            )
 
 
 class AlwaysInvalidClient:
@@ -978,10 +947,13 @@ def test_exact_structural_template_is_recovery_only(tmp_path):
     runtime._append_invalid_message(generic_call, "Invalid shape", contract)
     recovery_payload = json.loads(runtime.conversation[-1]["content"])
     assert recovery_payload["type"] == "invalid_tool_call_recovery"
-    assert "exact_tailor_resume_structural_template" in recovery_payload
-    template = recovery_payload["exact_tailor_resume_structural_template"]
-    assert template["job_id"] == ids[0]
-    assert template["edit_plan"]["job_id"] == ids[0]
+    assert recovery_payload["error_category"] == "draft_schema"
+    assert "exact_tailor_resume_structural_template" not in recovery_payload
+    assert "required_argument_shape" in recovery_payload
+    shape = recovery_payload["required_argument_shape"]
+    assert shape["job_id"] == ids[0]
+    assert "edit_plan" not in shape
+    assert "citations" not in json.dumps(shape)
 
 
 def test_length_limited_empty_response_is_invalid_without_side_effects(
@@ -1079,7 +1051,7 @@ def _checkpoint_contract_from_messages(messages):
 
 
 def _legacy_duplicated_tailoring_messages(runtime, contract):
-    """Approximate the pre-deduplication tailoring payload for size comparison."""
+    """Approximate the pre-compaction full-schema tailoring payload for size comparison."""
     assert runtime.registry is not None
     target_job_id = contract["target_job_id"]
     citation_contract = runtime._build_citation_contract(target_job_id)
@@ -1095,9 +1067,36 @@ def _legacy_duplicated_tailoring_messages(runtime, contract):
         }
         for bullet in target_context["editable_experience_bullets"]
     ]
+    full_shape = {
+        "decision_summary": "<concise explanation>",
+        "job_id": target_job_id,
+        "edit_plan": {
+            "job_id": target_job_id,
+            "professional_summary": {
+                "new_text": "<tailored summary>",
+                "reason": "<reason>",
+                "citations": citation_contract["summary_required_citations"],
+            },
+            "experience_bullet_edits": [
+                {
+                    "bullet_id": bullet["bullet_id"],
+                    "new_text": "<tailored bullet text>",
+                    "reason": "<reason>",
+                    "citations": citation_contract["bullet_required_citations"][
+                        bullet["bullet_id"]
+                    ],
+                }
+                for bullet in target_context["editable_experience_bullets"]
+            ],
+            "skill_section_edits": [],
+            "project_swap": None,
+            "plan_rationale": "<concise rationale>",
+        },
+    }
     duplicated_contract = {
         **runtime._contract_for_model(contract),
         "target_context": target_context,
+        "required_argument_shape": full_shape,
         "constraints": list(TAILOR_RESUME_CONSTRAINTS)
         + list(TAILOR_RESUME_PLAN_LIMITS),
     }
@@ -1106,9 +1105,12 @@ def _legacy_duplicated_tailoring_messages(runtime, contract):
     )
     checkpoint["next_action_contract"] = duplicated_contract
     checkpoint["target_context"] = target_context
+    legacy_schemas = runtime.registry.model_schemas(["tailor_resume"])
     return [
         {"role": "system", "content": "system"},
         {"role": "user", "content": json.dumps(checkpoint, separators=(",", ":"))},
+        {"role": "assistant", "content": "", "tool_calls": []},
+        {"role": "user", "content": json.dumps({"tools": legacy_schemas}, separators=(",", ":"))},
     ]
 
 
@@ -1123,63 +1125,122 @@ def _tailoring_contract(runtime):
     return contract
 
 
-def _bad_tailor_call(runtime, *, bad_job_field: str, citation_index: int = 0):
+def _bad_semantic_tailor_draft(runtime):
     contract = _tailoring_contract(runtime)
     assert runtime.registry is not None
     assert runtime.state is not None
     job_id = contract["target_job_id"]
     job = runtime.registry._job(job_id)
-    plan = valid_resume_plan(
-        job,
-        runtime.state.fit_analyses[job_id],
-        runtime.registry.bundle,
-    ).model_dump(mode="json")
-    plan["professional_summary"]["citations"][citation_index][
-        "source_field"
-    ] = bad_job_field
-    call = _tool(
-        "tailor_resume",
-        {
-            "decision_summary": "Submit a draft with an invalid job citation field.",
-            "job_id": job_id,
-            "edit_plan": plan,
-        },
-        1,
-    )
-    return contract, call
-
-
-def _contract_citation_tailor_call(runtime):
-    contract = _tailoring_contract(runtime)
-    assert runtime.registry is not None
-    assert runtime.state is not None
-    job_id = contract["target_job_id"]
-    job = runtime.registry._job(job_id)
-    shape = contract["required_argument_shape"]
-    plan = valid_resume_plan(
-        job,
-        runtime.state.fit_analyses[job_id],
-        runtime.registry.bundle,
-    ).model_dump(mode="json")
-    plan["professional_summary"]["citations"] = copy.deepcopy(
-        shape["edit_plan"]["professional_summary"]["citations"]
-    )
-    for index, edit in enumerate(plan["experience_bullet_edits"]):
-        edit["citations"] = copy.deepcopy(
-            shape["edit_plan"]["experience_bullet_edits"][index]["citations"]
+    analysis = runtime.state.fit_analyses[job_id]
+    plan = valid_resume_plan(job, analysis, runtime.registry.bundle)
+    draft = _compact_draft_from_plan(plan, job_id)
+    gaps = analysis.core_skills.genuine_gaps
+    if gaps:
+        draft["professional_summary"]["new_text"] = (
+            f"AI Engineer with Python delivery and {gaps[0]} expertise."
         )
-    return contract, _tool(
-        "tailor_resume",
-        {
-            "decision_summary": "Create the first deterministic draft.",
-            "job_id": job_id,
-            "edit_plan": plan,
-        },
-        1,
+    else:
+        draft["experience_bullet_edits"][0]["new_text"] = (
+            "Built Python models that improved recall by 99%."
+        )
+    return contract, _tool("tailor_resume", draft, 1)
+
+
+def _valid_compact_tailor_call(runtime):
+    contract = _tailoring_contract(runtime)
+    assert runtime.registry is not None
+    assert runtime.state is not None
+    job_id = contract["target_job_id"]
+    job = runtime.registry._job(job_id)
+    plan = valid_resume_plan(
+        job,
+        runtime.state.fit_analyses[job_id],
+        runtime.registry.bundle,
     )
+    plan.experience_bullet_edits[0].new_text = (
+        "Built Python and scikit-learn risk models over SQL datasets, raising "
+        "validated recall by 14% while holding the false-positive rate constant."
+    )
+    draft = _compact_draft_from_plan(plan, job_id)
+    return contract, _tool("tailor_resume", draft, 1)
 
 
-def test_tailoring_citation_contract_is_exact_and_target_specific(tmp_path):
+def test_tailor_resume_model_facing_schema_constraints(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract = _tailoring_contract(runtime)
+    schemas = runtime._model_schemas_for_contract(contract)
+    assert schemas[0]["function"]["name"] == "tailor_resume"
+    schema_text = json.dumps(schemas[0]["function"]["parameters"])
+    for forbidden in (
+        "citation",
+        "evidence_id",
+        "bullet_id",
+        "candidate_id",
+        "remove_project_id",
+        "add_project_id",
+        "skill_section_edits",
+        "edit_plan",
+    ):
+        assert forbidden not in schema_text
+    assert schemas[0]["function"]["parameters"]["properties"]["experience_bullet_edits"][
+        "maxItems"
+    ] == 2
+    assert schemas[0]["function"]["parameters"]["properties"]["experience_bullet_edits"][
+        "minItems"
+    ] == 2
+    with pytest.raises(Exception):
+        _TailorResumeTextDraftArguments.model_validate(
+            {
+                "decision_summary": "x",
+                "job_id": contract["target_job_id"],
+                "professional_summary": {"new_text": "x", "reason": "x"},
+                "experience_bullet_edits": [
+                    {"new_text": "x", "reason": "x"},
+                    {"new_text": "x", "reason": "x"},
+                    {"new_text": "x", "reason": "x"},
+                ],
+                "project_swap_reason": None,
+                "plan_rationale": "x",
+            }
+        )
+    with pytest.raises(Exception):
+        _TailorResumeTextDraftArguments.model_validate(
+            {
+                "decision_summary": "x",
+                "job_id": contract["target_job_id"],
+                "professional_summary": {"new_text": "x", "reason": "x"},
+                "experience_bullet_edits": [
+                    {"new_text": "x", "reason": "x"},
+                    {"new_text": "x", "reason": "x"},
+                ],
+                "project_swap_reason": None,
+                "plan_rationale": "x",
+                "edit_plan": {},
+            }
+        )
+
+
+def test_tailor_resume_compact_schema_is_smaller_than_full_registry_schema(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.registry is not None
+    contract = _tailoring_contract(runtime)
+    compact_size = len(
+        json.dumps(
+            runtime._model_schemas_for_contract(contract),
+            separators=(",", ":"),
+        )
+    )
+    full_size = len(
+        json.dumps(
+            runtime.registry.model_schemas(["tailor_resume"]),
+            separators=(",", ":"),
+        )
+    )
+    reduction = 1 - (compact_size / full_size)
+    assert reduction >= 0.55
+
+
+def test_hydration_injects_exact_citations_and_ids(tmp_path):
     from src.models.candidate import CandidateProfile
     from src.models.job import Job
 
@@ -1188,9 +1249,7 @@ def test_tailoring_citation_contract_is_exact_and_target_specific(tmp_path):
     contract = _tailoring_contract(runtime)
     job_id = contract["target_job_id"]
     candidate_id = runtime.registry.bundle.profile.candidate_id
-    shape = contract["required_argument_shape"]
     citation_contract = runtime._build_citation_contract(job_id)
-
     default_job = citation_contract["default_job_citation"]
     assert default_job == {
         "source_type": "job_posting",
@@ -1202,14 +1261,19 @@ def test_tailoring_citation_contract_is_exact_and_target_specific(tmp_path):
     assert "required_citations" not in json.dumps(
         contract["target_context"]["editable_experience_bullets"]
     )
-    assert "target_context" not in json.dumps(
-        runtime._build_workflow_checkpoint(contract)["next_action_contract"]
-    )
 
-    summary_citations = shape["edit_plan"]["professional_summary"]["citations"]
+    _, raw_call = _valid_compact_tailor_call(runtime)
+    raw_snapshot = copy.deepcopy(raw_call.arguments)
+    hydrated = runtime._hydrate_tailor_resume_call(raw_call, contract)
+    assert raw_call.arguments == raw_snapshot
+
+    summary_citations = hydrated.arguments["edit_plan"]["professional_summary"][
+        "citations"
+    ]
     assert summary_citations[0]["source_type"] == "job_posting"
     assert summary_citations[0]["source_id"] == job_id
     assert summary_citations[0]["source_field"] in Job.model_fields
+    assert summary_citations[0]["source_field"] == "required_skills_raw"
     assert summary_citations[1] == {
         "source_type": "candidate_profile",
         "source_id": candidate_id,
@@ -1218,98 +1282,97 @@ def test_tailoring_citation_contract_is_exact_and_target_specific(tmp_path):
     }
     assert summary_citations[1]["source_field"] in CandidateProfile.model_fields
 
-    bullet_one = shape["edit_plan"]["experience_bullet_edits"][0]["citations"]
-    assert bullet_one[0] == {
+    bullet_one = hydrated.arguments["edit_plan"]["experience_bullet_edits"][0]
+    assert bullet_one["bullet_id"] == "exp-primary-bullet-1"
+    assert bullet_one["citations"][0] == {
         "source_type": "experience_bullet",
         "source_id": "exp-primary-bullet-1",
         "source_field": "text",
         "evidence_id": "EV-EXP-BULLET-001",
     }
-    assert bullet_one[1] == default_job
-    bullet_two = shape["edit_plan"]["experience_bullet_edits"][1]["citations"]
-    assert bullet_two[0]["source_id"] == "exp-primary-bullet-2"
-    assert bullet_two[0]["evidence_id"] == "EV-EXP-BULLET-002"
-    assert bullet_two[1] == default_job
-    assert len(shape["edit_plan"]["experience_bullet_edits"]) == 2
+    assert bullet_one["citations"][1] == default_job
+    bullet_two = hydrated.arguments["edit_plan"]["experience_bullet_edits"][1]
+    assert bullet_two["bullet_id"] == "exp-primary-bullet-2"
+    assert bullet_two["citations"][0]["evidence_id"] == "EV-EXP-BULLET-002"
+    assert hydrated.arguments["edit_plan"]["skill_section_edits"] == []
+    assert hydrated.arguments["job_id"] == job_id
+    assert hydrated.arguments["edit_plan"]["job_id"] == job_id
+    assert hydrated.arguments["edit_plan"]["project_swap"] is None
 
 
-def test_invalid_job_citation_fields_are_rejected_with_recovery(tmp_path):
+def test_semantic_text_recovery_after_hydrated_evidence_failure(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
     progress: list[str] = []
     runtime.progress_callback = progress.append
     runtime.state.model_call_count = 6
 
-    for bad_field in ("aligned_skills", "job_posting"):
-        contract, call = _bad_tailor_call(runtime, bad_job_field=bad_field)
-        response = NormalizedAssistantMessage(tool_calls=[call])
-        valid, invalid = runtime._execute_response_calls(response, contract)
-        assert valid == 0
-        assert invalid == 1
-        recovery = json.loads(runtime.conversation[-1]["content"])
-        assert recovery["type"] == "invalid_tool_call_recovery"
-        assert recovery["error_category"] == "citation"
-        assert "Unknown job citation field" in recovery["error"]
-        assert "citation_recovery_contract" in recovery
-        assert "required_argument_shape" not in recovery
-        assert "target_context" not in recovery
-        assert "constraints" not in recovery
-        assert len(runtime.conversation) == 3
-        recovery_contract = recovery["citation_recovery_contract"]
-        assert (
-            recovery_contract["default_job_citation"]["source_field"]
-            == "required_skills_raw"
-        )
-        assert "aligned_skills" in recovery_contract["invalid_job_source_fields"]
-        assert "job_posting" in recovery_contract["invalid_job_source_fields"]
-        assert "exact_tailor_resume_structural_template" not in recovery
-        assert bad_field not in recovery_contract["valid_job_source_fields"]
-        other_ids = [
-            item
-            for item in runtime.state.top_3_job_ids
-            if item != contract["target_job_id"]
-        ]
-        serialized = json.dumps(recovery)
-        assert all(other_id not in serialized for other_id in other_ids)
+    contract, call = _bad_semantic_tailor_draft(runtime)
+    response = NormalizedAssistantMessage(tool_calls=[call])
+    valid, invalid = runtime._execute_response_calls(response, contract)
+    assert valid == 0
+    assert invalid == 1
+    recovery = json.loads(runtime.conversation[-1]["content"])
+    assert recovery["type"] == "invalid_tool_call_recovery"
+    assert recovery["error_category"] == "semantic_text"
+    assert "Revise only the semantic text fields" in recovery["instruction"]
+    assert "citation_recovery_contract" not in recovery
+    assert "exact_tailor_resume_structural_template" not in recovery
+    assert "required_argument_shape" not in recovery
+    assert len(runtime.conversation) == 3
+    assert "genuine-gap" in recovery["error"].casefold() or "genuine gap" in recovery[
+        "error"
+    ].casefold()
 
-    assert "Model call 6: tool call rejected by validation" in progress
-    assert "Validation category: citation" in progress
-    assert "aligned_skills" not in progress
-    assert "EV-EXP-BULLET-001" not in progress
+    contract2, call2 = _valid_compact_tailor_call(runtime)
+    hydrated1 = runtime._hydrate_tailor_resume_call(call, contract)
+    hydrated2 = runtime._hydrate_tailor_resume_call(call2, contract2)
+    assert (
+        hydrated1.arguments["edit_plan"]["professional_summary"]["citations"]
+        == hydrated2.arguments["edit_plan"]["professional_summary"]["citations"]
+    )
+    assert (
+        hydrated1.arguments["edit_plan"]["experience_bullet_edits"][0]["citations"]
+        == hydrated2.arguments["edit_plan"]["experience_bullet_edits"][0]["citations"]
+    )
 
 
-def test_citation_recovery_omits_structural_template_for_citation_only_errors(
-    tmp_path,
-):
+def test_semantic_recovery_omits_structural_template(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
-    contract, call = _bad_tailor_call(runtime, bad_job_field="job_posting")
+    contract, call = _bad_semantic_tailor_draft(runtime)
     runtime._append_invalid_message(
         call,
-        "Unknown job citation field 'job_posting'",
+        "Resume evidence rejection: genuine-gap skill claim",
         contract,
     )
     payload = json.loads(runtime.conversation[-1]["content"])
     assert payload["type"] == "invalid_tool_call_recovery"
-    assert "citation_recovery_contract" in payload
+    assert payload["error_category"] == "semantic_text"
     assert "exact_tailor_resume_structural_template" not in payload
     assert len(runtime.conversation) == 3
 
 
-def test_tailor_with_supplied_exact_citations_executes(tmp_path, monkeypatch):
+def test_hydrated_compact_draft_executes_resume_tool(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
     )
     runtime = _runtime_at_tailoring(tmp_path)
     assert runtime.state is not None
-    contract, call = _contract_citation_tailor_call(runtime)
+    tracer = NoOpAgentTracer()
+    runtime.trace = tracer.start_trace("agent_run", run_id=runtime.run_id)
+    contract, call = _valid_compact_tailor_call(runtime)
     response = NormalizedAssistantMessage(tool_calls=[call])
     valid, invalid = runtime._execute_response_calls(response, contract)
     assert valid == 1
     assert invalid == 0
     assert len(runtime.state.draft_resumes) == 1
     assert runtime.state.draft_resumes[contract["target_job_id"]] is not None
-    assert len(
-        contract["required_argument_shape"]["edit_plan"]["experience_bullet_edits"]
-    ) == 2
+    tool_span = next(
+        item
+        for item in runtime.trace.record.observations
+        if item.name == "tool_call:tailor_resume"
+    )
+    assert "edit_plan" in tool_span.input["arguments"]
+    assert tool_span.input["arguments"]["edit_plan"]["professional_summary"]["citations"]
 
 
 def test_first_tailoring_payload_is_deduplicated_and_smaller(tmp_path):
@@ -1321,11 +1384,17 @@ def test_first_tailoring_payload_is_deduplicated_and_smaller(tmp_path):
     legacy_size = len(json.dumps(legacy_messages, separators=(",", ":")))
     reduction = 1 - (current_size / legacy_size)
     assert reduction >= 0.30
+    assert current_size < 8731
     checkpoint = json.loads(current_messages[1]["content"])
     shape = checkpoint["next_action_contract"]["required_argument_shape"]
-    assert shape["edit_plan"]["professional_summary"]["citations"]
+    assert "edit_plan" not in shape
+    serialized = json.dumps(current_messages)
+    assert '"source_type"' not in serialized
+    assert '"evidence_id"' not in serialized
     assert checkpoint["target_context"]["target_job_id"] == contract["target_job_id"]
     assert "target_context" not in checkpoint["next_action_contract"]
+    schemas = runtime._model_schemas_for_contract(contract)
+    assert "ResumeEditPlan" not in json.dumps(schemas)
 
 
 def test_missing_tool_call_stop_recovery_is_bounded(tmp_path):
@@ -1374,4 +1443,5 @@ def test_model_call_payload_diagnostics_are_recorded_not_in_messages(tmp_path):
     assert generation.metadata["serialized_tool_schema_char_count"] > 0
     assert generation.metadata["phase"] == "resume_tailoring"
     assert generation.metadata["target_rank"] == 1
+    assert generation.metadata["model_argument_mode"] == "tailor_resume_text_draft"
     assert "model_message_count" not in runtime.conversation[-1]["content"]

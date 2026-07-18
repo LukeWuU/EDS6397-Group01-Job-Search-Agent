@@ -74,19 +74,16 @@ TAILOR_RESUME_ARGUMENT_TEMPLATE = {
 }
 
 TAILOR_RESUME_NORMAL_CONSTRAINTS = [
-    "Return exactly one tailor_resume tool call.",
-    "Outer job_id and edit_plan.job_id must equal TARGET_JOB_ID.",
-    "Exactly two different editable experience bullet IDs are required.",
-    "Copy citation identity objects from required_argument_shape exactly.",
-    (
-        "Summary requires job and candidate evidence; each bullet requires "
-        "its bullet and job citations."
-    ),
+    "Return exactly one tailor_resume tool call with semantic text fields only.",
+    "job_id must equal TARGET_JOB_ID.",
+    "Provide exactly two experience_bullet_edits with new_text and reason only.",
+    "Python supplies bullet IDs, citations, project IDs, and nested structure.",
+    "project_swap_reason must be null when no swap is required.",
+    "project_swap_reason must be a nonempty string when Fit Analysis requires a swap.",
     (
         "Preserve supported facts and metrics; no unsupported or "
         "genuine-gap claims."
     ),
-    "project_swap must match the target Fit Analysis.",
     (
         "professional_summary.new_text: at most 55 words; each bullet new_text: "
         "at most 32 words; each reason: at most 18 words; plan_rationale: "
