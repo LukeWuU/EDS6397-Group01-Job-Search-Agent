@@ -19,32 +19,34 @@ This project was developed for EDS 6397: Generative AI and Applications.
 ## Architecture
 
 ```mermaid
-flowchart TD
-    A[Repository Inputs] --> B[Preflight Validation]
-    B --> C[Single Job Search Agent]
+graph TD;
+    A["Repository Inputs"] --> B["Preflight Validation"];
+    B --> C["Single Job Search Agent"];
 
-    C --> T1[Tool 1: filter_jobs]
-    T1 --> T2[Tool 2: score_jobs]
-    T2 --> T3[Tool 3: analyze_fit<br/>Top 3 jobs]
-    T3 --> T4[Tool 4: tailor_resume<br/>Initial drafts]
+    C --> D["Tool 1: filter_jobs"];
+    D --> E["Tool 2: score_jobs"];
+    E --> F["Tool 3: analyze_fit for Top 3"];
+    F --> G["Tool 4: tailor_resume"];
 
-    T4 --> H[Single Human Review Pause]
-    H -->|Approve| F[Finalize Resume]
-    H -->|Reject with feedback| R[Revision Round]
-    R --> T4
-    H -->|Approved candidate fact| M[(Persistent Memory)]
-    M --> C
+    G --> H["Single Human Review Pause"];
+    H --> I["Approved Resumes"];
+    H --> J["Revision Feedback"];
+    J --> G;
 
-    F --> T5[Tool 5: generate_cover_letter]
-    T5 --> O[Three Final Job Output Folders]
+    H --> K["Approved Candidate Facts"];
+    K --> L["Persistent memory.json"];
+    L --> C;
 
-    C --> L[Langfuse Trace]
-    T1 --> L
-    T2 --> L
-    T3 --> L
-    T4 --> L
-    H --> L
-    T5 --> L
+    I --> M["Tool 5: generate_cover_letter"];
+    M --> N["Three Final Job Output Folders"];
+
+    C --> O["Langfuse Trace"];
+    D --> O;
+    E --> O;
+    F --> O;
+    G --> O;
+    H --> O;
+    M --> O;
 ```
 
 ## Single-Agent Design
