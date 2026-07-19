@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
@@ -40,10 +40,9 @@ def deterministic_review_fact_id(fact: "ReviewFactInput") -> str:
     return f"fact-{hashlib.sha256(key.encode('utf-8')).hexdigest()[:20]}"
 
 
-def _deterministic_created_at(fact_id: str) -> datetime:
-    """Provide a schema-required timestamp without making results nondeterministic."""
-    seconds = int(hashlib.sha256(fact_id.encode("utf-8")).hexdigest()[:8], 16)
-    return datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=seconds % 31_536_000)
+def _current_utc_created_at() -> datetime:
+    """Return the actual UTC time when a review fact is created."""
+    return datetime.now(timezone.utc)
 
 
 def _merge_tags(existing: Sequence[str], incoming: Sequence[str]) -> list[str]:
@@ -110,7 +109,7 @@ def apply_review_facts(
                 run_id=run_id,
                 reviewer_role="candidate",
             ),
-            created_at=_deterministic_created_at(fact_id),
+            created_at=_current_utc_created_at(),
             applied_in_run=True,
         )
         existing_by_key[key] = len(facts)

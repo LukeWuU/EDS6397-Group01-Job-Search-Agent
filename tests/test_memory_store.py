@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -64,6 +65,25 @@ def test_apply_save_and_load_graphql_atomically(tmp_path: Path) -> None:
     assert not path.read_bytes().startswith(b"\xef\xbb\xbf")
     assert not (tmp_path / ".memory.json.tmp").exists()
 
+def test_new_fact_records_actual_utc_creation_time(monkeypatch) -> None:
+    """A newly learned fact records the UTC time supplied at creation."""
+    fixed_created_at = datetime(2026, 7, 19, 2, 35, 54, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(
+        "src.services.memory_store._current_utc_created_at",
+        lambda: fixed_created_at,
+    )
+
+    updated = apply_review_facts(
+        _empty_memory(),
+        [_graphql()],
+        1,
+        ["job-a"],
+    )
+
+    assert updated.facts[0].created_at == fixed_created_at
+    assert updated.facts[0].created_at.utcoffset() is not None
+    assert updated.facts[0].created_at.utcoffset().total_seconds() == 0
 
 def test_equivalent_fact_deduplicates_and_merges_tags() -> None:
     original = _empty_memory()

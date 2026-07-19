@@ -132,7 +132,7 @@ def test_actual_filtered_dataset_scoring_invariants(
     )
     final_scores = [job.final_score for job in result.ranked_jobs]
     assert final_scores == sorted(final_scores, reverse=True)
-    assert result.memory_fact_count == 0
+    assert result.memory_fact_count == len(repository_memory.facts)
 
     for job_score in result.ranked_jobs:
         assert 0 <= job_score.final_score <= 100
@@ -244,11 +244,17 @@ def test_candidate_fact_does_not_become_skill(
 
 def test_empty_memory_scores_successfully(
     repository_bundle: CandidateBundle,
-    repository_memory: CandidateMemory,
 ) -> None:
-    """Actual empty memory loads and scores successfully."""
+    """An isolated empty memory document scores successfully."""
+    empty_memory = CandidateMemory(
+        schema_version="1.0",
+        candidate_id=CANDIDATE_ID,
+        facts=[],
+    )
     job = make_job(required_skills=["Python"])
-    result = scoring_tool([job], repository_bundle, repository_memory)
+
+    result = scoring_tool([job], repository_bundle, empty_memory)
+
     assert result.memory_fact_count == 0
     assert result.ranked_jobs[0].matched_required_skills == ["Python"]
 

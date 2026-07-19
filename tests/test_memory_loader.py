@@ -20,13 +20,37 @@ MEMORY_PATH = ROOT / "memory.json"
 CANDIDATE_ID = "cand-mira-solenne-001"
 
 
-def test_current_empty_memory_loads() -> None:
-    """The repository's empty memory document validates successfully."""
-    memory = load_memory(MEMORY_PATH, CANDIDATE_ID)
+def test_empty_memory_document_loads(tmp_path: Path) -> None:
+    """An isolated empty memory document validates successfully."""
+    empty_memory_path = tmp_path / "memory.json"
+    empty_memory_path.write_text(
+        (
+            '{\n'
+            '  "schema_version": "1.0",\n'
+            f'  "candidate_id": "{CANDIDATE_ID}",\n'
+            '  "facts": []\n'
+            '}\n'
+        ),
+        encoding="utf-8",
+    )
+
+    memory = load_memory(empty_memory_path, CANDIDATE_ID)
 
     assert memory.candidate_id == CANDIDATE_ID
     assert memory.schema_version == "1.0"
     assert memory.facts == []
+
+
+def test_current_repository_memory_loads() -> None:
+    """The repository memory document remains schema-valid after a final run."""
+    memory = load_memory(MEMORY_PATH, CANDIDATE_ID)
+
+    assert memory.candidate_id == CANDIDATE_ID
+    assert memory.schema_version == "1.0"
+    assert all(
+        fact.provenance.source == "candidate_review"
+        for fact in memory.facts
+    )
 
 
 def test_candidate_id_mismatch_fails(tmp_path: Path) -> None:
