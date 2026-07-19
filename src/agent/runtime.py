@@ -426,6 +426,7 @@ class _CoverLetterAuditIssue(BaseModel):
     field: str
     category: str
     message: str
+    code: str | None = None
 
 
 class _CoverLetterAuditResult(BaseModel):
@@ -462,6 +463,42 @@ _COVER_LEAD_IN_MAX_WORDS = 30
 _COVER_FOLLOW_UP_MIN_WORDS = 5
 _COVER_FOLLOW_UP_MAX_WORDS = 45
 _COVER_WRAPPER_BULLET_MARKERS = ("•", "·", "- ", "* ", "1.", "2.")
+_COVER_ASSEMBLED_PARAGRAPH_MIN_WORDS = 35
+_COVER_ASSEMBLED_PARAGRAPH_MAX_WORDS = 120
+_COVER_REASON_MAX_WORDS = 18
+_COVER_NORMALIZED_REASON = (
+    "Connects verified candidate evidence to the role requirements."
+)
+_COVER_WRAPPER_LEAD_TIERS = (
+    "My background aligns with the practical responsibilities of this role.",
+    "I am interested in applying my technical background to the responsibilities of this role.",
+    (
+        "I am interested in bringing an evidence-driven technical approach to the "
+        "collaborative responsibilities of this role."
+    ),
+)
+_COVER_WRAPPER_FOLLOW_TIERS = (
+    "This experience is directly relevant to the position.",
+    (
+        "This evidence demonstrates practical experience relevant to the position "
+        "and its technical responsibilities."
+    ),
+    (
+        "This evidence demonstrates a disciplined and practical approach that aligns "
+        "with the collaborative technical responsibilities of the position."
+    ),
+)
+_COVER_WRAPPER_REPAIRABLE_CODES = frozenset(
+    {
+        "lead_in_too_short",
+        "lead_in_too_long",
+        "follow_up_too_short",
+        "follow_up_too_long",
+        "reason_too_long",
+        "assembled_paragraph_too_short",
+        "assembled_paragraph_too_long",
+    }
+)
 _COVER_CITATION_SOURCE_ORDER = {
     "job_posting": 0,
     "experience": 1,
@@ -637,6 +674,7 @@ class JobSearchAgentRuntime:
         )
         self._cover_letter_last_invalid_fingerprint: str | None = None
         self._cover_letter_invalid_repeat_count = 0
+        self._cover_letter_wrapper_repair_meta: dict[str, Any] | None = None
         self._cover_letter_date = cover_letter_date or date.today()
 
     @staticmethod
@@ -2397,7 +2435,7 @@ class JobSearchAgentRuntime:
             lead_in=(str, Field(min_length=1)),
             selected_candidate_claim=claim_field,
             follow_up=(str, Field(min_length=1)),
-            reason=(str, Field(min_length=1, max_length=200)),
+            reason=(str, Field(min_length=1)),
         )
         self._cover_letter_schema_model_cache[cache_key] = model
         return model
@@ -2673,42 +2711,24 @@ class JobSearchAgentRuntime:
                     return True
         return False
 
-    def _audit_paragraph_wrapper_segments(
+    def _audit_paragraph_wrapper_nonrepairable(
         self,
         paragraph: dict[str, Any],
         field: str,
-        job_id: str,
         allowed_claims: list[str],
     ) -> list[_CoverLetterAuditIssue]:
         issues: list[_CoverLetterAuditIssue] = []
         lead_in = str(paragraph.get("lead_in", ""))
         follow_up = str(paragraph.get("follow_up", ""))
-        reason = str(paragraph.get("reason", ""))
         selected = str(paragraph.get("selected_candidate_claim", ""))
 
         for segment_name, segment in (("lead_in", lead_in), ("follow_up", follow_up)):
-            words = _word_count(segment)
-            min_words, max_words = (
-                (_COVER_LEAD_IN_MIN_WORDS, _COVER_LEAD_IN_MAX_WORDS)
-                if segment_name == "lead_in"
-                else (_COVER_FOLLOW_UP_MIN_WORDS, _COVER_FOLLOW_UP_MAX_WORDS)
-            )
-            if not min_words <= words <= max_words:
-                issues.append(
-                    _CoverLetterAuditIssue(
-                        field=field,
-                        category="semantic_text",
-                        message=(
-                            f"{field}.{segment_name} must contain {min_words} to "
-                            f"{max_words} words; found {words}"
-                        ),
-                    )
-                )
             if re.search(r"\d", segment):
                 issues.append(
                     _CoverLetterAuditIssue(
                         field=field,
                         category="semantic_text",
+                        code="wrapper_digits",
                         message=f"{field}.{segment_name} must not contain digits",
                     )
                 )
@@ -2717,6 +2737,7 @@ class JobSearchAgentRuntime:
                     _CoverLetterAuditIssue(
                         field=field,
                         category="semantic_text",
+                        code="wrapper_percent",
                         message=f"{field}.{segment_name} must not contain percent signs",
                     )
                 )
@@ -2726,6 +2747,7 @@ class JobSearchAgentRuntime:
                         _CoverLetterAuditIssue(
                             field=field,
                             category="semantic_text",
+                            code="wrapper_bullet_marker",
                             message=(
                                 f"{field}.{segment_name} must not contain bullet "
                                 "markers or headings"
@@ -2738,6 +2760,7 @@ class JobSearchAgentRuntime:
                         _CoverLetterAuditIssue(
                             field=field,
                             category="semantic_text",
+                            code="wrapper_claim_paraphrase",
                             message=(
                                 f"{field}.{segment_name} must not repeat or restate "
                                 "an allowed candidate claim"
@@ -2752,6 +2775,7 @@ class JobSearchAgentRuntime:
                             _CoverLetterAuditIssue(
                                 field=field,
                                 category="semantic_text",
+                                code="wrapper_metric_restatement",
                                 message=(
                                     f"{field}.{segment_name} must not restate "
                                     "candidate metrics"
@@ -2759,19 +2783,12 @@ class JobSearchAgentRuntime:
                             )
                         )
 
-        if _word_count(reason) > 18:
-            issues.append(
-                _CoverLetterAuditIssue(
-                    field=field,
-                    category="semantic_text",
-                    message=f"{field} reason must be at most 18 words",
-                )
-            )
         if selected and selected not in set(allowed_claims):
             issues.append(
                 _CoverLetterAuditIssue(
                     field=field,
                     category="draft_schema",
+                    code="invalid_selected_claim",
                     message=(
                         f"{field}.selected_candidate_claim must be one of the "
                         "allowed claim enum values"
@@ -2779,6 +2796,322 @@ class JobSearchAgentRuntime:
                 )
             )
         return issues
+
+    def _audit_paragraph_wrapper_length(
+        self,
+        paragraph: dict[str, Any],
+        field: str,
+        *,
+        assembled_word_count: int | None = None,
+    ) -> list[_CoverLetterAuditIssue]:
+        issues: list[_CoverLetterAuditIssue] = []
+        lead_in = str(paragraph.get("lead_in", ""))
+        follow_up = str(paragraph.get("follow_up", ""))
+        reason = str(paragraph.get("reason", ""))
+
+        lead_words = _word_count(lead_in)
+        if lead_words < _COVER_LEAD_IN_MIN_WORDS:
+            issues.append(
+                _CoverLetterAuditIssue(
+                    field=field,
+                    category="semantic_text",
+                    code="lead_in_too_short",
+                    message=(
+                        f"{field}.lead_in must contain {_COVER_LEAD_IN_MIN_WORDS} to "
+                        f"{_COVER_LEAD_IN_MAX_WORDS} words; found {lead_words}"
+                    ),
+                )
+            )
+        elif lead_words > _COVER_LEAD_IN_MAX_WORDS:
+            issues.append(
+                _CoverLetterAuditIssue(
+                    field=field,
+                    category="semantic_text",
+                    code="lead_in_too_long",
+                    message=(
+                        f"{field}.lead_in must contain {_COVER_LEAD_IN_MIN_WORDS} to "
+                        f"{_COVER_LEAD_IN_MAX_WORDS} words; found {lead_words}"
+                    ),
+                )
+            )
+
+        follow_words = _word_count(follow_up)
+        if follow_words < _COVER_FOLLOW_UP_MIN_WORDS:
+            issues.append(
+                _CoverLetterAuditIssue(
+                    field=field,
+                    category="semantic_text",
+                    code="follow_up_too_short",
+                    message=(
+                        f"{field}.follow_up must contain {_COVER_FOLLOW_UP_MIN_WORDS} "
+                        f"to {_COVER_FOLLOW_UP_MAX_WORDS} words; found {follow_words}"
+                    ),
+                )
+            )
+        elif follow_words > _COVER_FOLLOW_UP_MAX_WORDS:
+            issues.append(
+                _CoverLetterAuditIssue(
+                    field=field,
+                    category="semantic_text",
+                    code="follow_up_too_long",
+                    message=(
+                        f"{field}.follow_up must contain {_COVER_FOLLOW_UP_MIN_WORDS} "
+                        f"to {_COVER_FOLLOW_UP_MAX_WORDS} words; found {follow_words}"
+                    ),
+                )
+            )
+
+        reason_words = _word_count(reason)
+        if reason_words > _COVER_REASON_MAX_WORDS:
+            issues.append(
+                _CoverLetterAuditIssue(
+                    field=field,
+                    category="semantic_text",
+                    code="reason_too_long",
+                    message=(
+                        f"{field} reason must be at most {_COVER_REASON_MAX_WORDS} "
+                        f"words; found {reason_words}"
+                    ),
+                )
+            )
+
+        if assembled_word_count is not None:
+            if assembled_word_count < _COVER_ASSEMBLED_PARAGRAPH_MIN_WORDS:
+                issues.append(
+                    _CoverLetterAuditIssue(
+                        field=field,
+                        category="semantic_text",
+                        code="assembled_paragraph_too_short",
+                        message=(
+                            f"{field} must contain {_COVER_ASSEMBLED_PARAGRAPH_MIN_WORDS} "
+                            f"to {_COVER_ASSEMBLED_PARAGRAPH_MAX_WORDS} words; "
+                            f"found {assembled_word_count}"
+                        ),
+                    )
+                )
+            elif assembled_word_count > _COVER_ASSEMBLED_PARAGRAPH_MAX_WORDS:
+                issues.append(
+                    _CoverLetterAuditIssue(
+                        field=field,
+                        category="semantic_text",
+                        code="assembled_paragraph_too_long",
+                        message=(
+                            f"{field} must contain {_COVER_ASSEMBLED_PARAGRAPH_MIN_WORDS} "
+                            f"to {_COVER_ASSEMBLED_PARAGRAPH_MAX_WORDS} words; "
+                            f"found {assembled_word_count}"
+                        ),
+                    )
+                )
+        return issues
+
+    def _audit_paragraph_wrapper_segments(
+        self,
+        paragraph: dict[str, Any],
+        field: str,
+        job_id: str,
+        allowed_claims: list[str],
+    ) -> list[_CoverLetterAuditIssue]:
+        del job_id
+        nonrepairable = self._audit_paragraph_wrapper_nonrepairable(
+            paragraph,
+            field,
+            allowed_claims,
+        )
+        if nonrepairable:
+            return nonrepairable
+        claim = str(paragraph.get("selected_candidate_claim", ""))
+        assembled = self._assemble_paragraph_text(
+            str(paragraph.get("lead_in", "")),
+            claim,
+            str(paragraph.get("follow_up", "")),
+        )
+        return self._audit_paragraph_wrapper_length(
+            paragraph,
+            field,
+            assembled_word_count=_word_count(assembled),
+        )
+
+    @classmethod
+    def _select_wrapper_tiers_for_claim(
+        cls,
+        claim: str,
+    ) -> tuple[int, int]:
+        claim_words = _word_count(claim)
+        if claim_words > _COVER_ASSEMBLED_PARAGRAPH_MAX_WORDS:
+            raise ToolArgumentsError(
+                "Cover letter wrapper repair rejection: selected claim exceeds "
+                "assembled paragraph maximum"
+            )
+        best: tuple[int, int, int] | None = None
+        for lead_idx, lead in enumerate(_COVER_WRAPPER_LEAD_TIERS):
+            lead_words = _word_count(lead)
+            if not _COVER_LEAD_IN_MIN_WORDS <= lead_words <= _COVER_LEAD_IN_MAX_WORDS:
+                continue
+            for follow_idx, follow in enumerate(_COVER_WRAPPER_FOLLOW_TIERS):
+                follow_words = _word_count(follow)
+                if not _COVER_FOLLOW_UP_MIN_WORDS <= follow_words <= _COVER_FOLLOW_UP_MAX_WORDS:
+                    continue
+                assembled_words = _word_count(
+                    cls._assemble_paragraph_text(lead, claim, follow)
+                )
+                if not (
+                    _COVER_ASSEMBLED_PARAGRAPH_MIN_WORDS
+                    <= assembled_words
+                    <= _COVER_ASSEMBLED_PARAGRAPH_MAX_WORDS
+                ):
+                    continue
+                tier_sum = lead_idx + follow_idx
+                if best is None or tier_sum < best[0] or (
+                    tier_sum == best[0] and lead_idx < best[1]
+                ):
+                    best = (tier_sum, lead_idx, follow_idx)
+        if best is None:
+            raise ToolArgumentsError(
+                "Cover letter wrapper repair rejection: no safe wrapper tier produces "
+                "a legal assembled paragraph"
+            )
+        return best[1], best[2]
+
+    @staticmethod
+    def _lead_tier_for_segment_repair(code: str) -> int:
+        if code == "lead_in_too_long":
+            return 0
+        for index, template in enumerate(_COVER_WRAPPER_LEAD_TIERS):
+            if _word_count(template) >= _COVER_LEAD_IN_MIN_WORDS:
+                return index
+        return len(_COVER_WRAPPER_LEAD_TIERS) - 1
+
+    @staticmethod
+    def _follow_tier_for_segment_repair(code: str) -> int:
+        if code == "follow_up_too_long":
+            return 0
+        for index, template in enumerate(_COVER_WRAPPER_FOLLOW_TIERS):
+            if _word_count(template) >= _COVER_FOLLOW_UP_MIN_WORDS:
+                return index
+        return len(_COVER_WRAPPER_FOLLOW_TIERS) - 1
+
+    def _repair_paragraph_wrapper_if_needed(
+        self,
+        paragraph: dict[str, Any],
+        field: str,
+        allowed_claims: list[str],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        nonrepairable = self._audit_paragraph_wrapper_nonrepairable(
+            paragraph,
+            field,
+            allowed_claims,
+        )
+        if nonrepairable:
+            _CoverLetterAuditResult(issues=nonrepairable).raise_if_issues()
+
+        repaired = copy.deepcopy(paragraph)
+        claim = str(repaired["selected_candidate_claim"])
+        original_lead = str(repaired.get("lead_in", ""))
+        original_follow = str(repaired.get("follow_up", ""))
+        original_reason = str(repaired.get("reason", ""))
+        meta: dict[str, Any] = {
+            "cover_letter_wrapper_length_repair_applied": False,
+            "cover_letter_lead_in_repaired": False,
+            "cover_letter_follow_up_repaired": False,
+            "cover_letter_reason_repaired": False,
+            "cover_letter_wrapper_template_tier": None,
+            "cover_letter_paragraph_word_count_after_repair": None,
+            "cover_letter_same_turn_repair": False,
+        }
+
+        assembled = self._assemble_paragraph_text(
+            str(repaired.get("lead_in", "")),
+            claim,
+            str(repaired.get("follow_up", "")),
+        )
+        length_issues = self._audit_paragraph_wrapper_length(
+            repaired,
+            field,
+            assembled_word_count=_word_count(assembled),
+        )
+        if not length_issues:
+            meta["cover_letter_paragraph_word_count_after_repair"] = _word_count(
+                assembled
+            )
+            return repaired, meta
+
+        meta["cover_letter_wrapper_length_repair_applied"] = True
+        meta["cover_letter_same_turn_repair"] = True
+        issue_codes = {issue.code for issue in length_issues if issue.code}
+
+        if "reason_too_long" in issue_codes:
+            repaired["reason"] = _COVER_NORMALIZED_REASON
+            meta["cover_letter_reason_repaired"] = True
+
+        if "lead_in_too_short" in issue_codes:
+            lead_idx = self._lead_tier_for_segment_repair("lead_in_too_short")
+            repaired["lead_in"] = _COVER_WRAPPER_LEAD_TIERS[lead_idx]
+            meta["cover_letter_lead_in_repaired"] = True
+            meta["cover_letter_wrapper_template_tier"] = f"lead:{lead_idx}"
+        elif "lead_in_too_long" in issue_codes:
+            lead_idx = self._lead_tier_for_segment_repair("lead_in_too_long")
+            repaired["lead_in"] = _COVER_WRAPPER_LEAD_TIERS[lead_idx]
+            meta["cover_letter_lead_in_repaired"] = True
+            meta["cover_letter_wrapper_template_tier"] = f"lead:{lead_idx}"
+
+        if "follow_up_too_short" in issue_codes:
+            follow_idx = self._follow_tier_for_segment_repair("follow_up_too_short")
+            repaired["follow_up"] = _COVER_WRAPPER_FOLLOW_TIERS[follow_idx]
+            meta["cover_letter_follow_up_repaired"] = True
+            tier = meta["cover_letter_wrapper_template_tier"]
+            meta["cover_letter_wrapper_template_tier"] = (
+                f"{tier},follow:{follow_idx}" if tier else f"follow:{follow_idx}"
+            )
+        elif "follow_up_too_long" in issue_codes:
+            follow_idx = self._follow_tier_for_segment_repair("follow_up_too_long")
+            repaired["follow_up"] = _COVER_WRAPPER_FOLLOW_TIERS[follow_idx]
+            meta["cover_letter_follow_up_repaired"] = True
+            tier = meta["cover_letter_wrapper_template_tier"]
+            meta["cover_letter_wrapper_template_tier"] = (
+                f"{tier},follow:{follow_idx}" if tier else f"follow:{follow_idx}"
+            )
+
+        assembled = self._assemble_paragraph_text(
+            str(repaired.get("lead_in", "")),
+            claim,
+            str(repaired.get("follow_up", "")),
+        )
+        assembled_words = _word_count(assembled)
+        if (
+            assembled_words < _COVER_ASSEMBLED_PARAGRAPH_MIN_WORDS
+            or assembled_words > _COVER_ASSEMBLED_PARAGRAPH_MAX_WORDS
+            or "assembled_paragraph_too_short" in issue_codes
+            or "assembled_paragraph_too_long" in issue_codes
+        ):
+            lead_idx, follow_idx = self._select_wrapper_tiers_for_claim(claim)
+            repaired["lead_in"] = _COVER_WRAPPER_LEAD_TIERS[lead_idx]
+            repaired["follow_up"] = _COVER_WRAPPER_FOLLOW_TIERS[follow_idx]
+            if repaired["lead_in"] != original_lead:
+                meta["cover_letter_lead_in_repaired"] = True
+            if repaired["follow_up"] != original_follow:
+                meta["cover_letter_follow_up_repaired"] = True
+            meta["cover_letter_wrapper_template_tier"] = (
+                f"lead:{lead_idx},follow:{follow_idx}"
+            )
+            assembled = self._assemble_paragraph_text(
+                repaired["lead_in"],
+                claim,
+                repaired["follow_up"],
+            )
+            assembled_words = _word_count(assembled)
+
+        remaining = self._audit_paragraph_wrapper_length(
+            repaired,
+            field,
+            assembled_word_count=assembled_words,
+        )
+        if remaining:
+            _CoverLetterAuditResult(issues=remaining).raise_if_issues()
+
+        if repaired["reason"] != original_reason:
+            meta["cover_letter_reason_repaired"] = True
+        meta["cover_letter_paragraph_word_count_after_repair"] = assembled_words
+        return repaired, meta
 
     def _assemble_cover_letter_transport(
         self,
@@ -2792,26 +3125,25 @@ class JobSearchAgentRuntime:
                 "Cover letter assembly rejection: missing deterministic target job"
             )
         allowed_claims = self._allowed_claims_for_contract(contract)
+        combined_repair_meta: dict[str, Any] = {}
         for field in ("body_paragraph_1", "body_paragraph_2"):
             paragraph = result.get(field)
             if not isinstance(paragraph, dict):
                 continue
             if "text" in paragraph and "selected_candidate_claim" not in paragraph:
                 continue
-            wrapper_issues = self._audit_paragraph_wrapper_segments(
+            repaired, repair_meta = self._repair_paragraph_wrapper_if_needed(
                 paragraph,
                 field,
-                target_job_id,
                 allowed_claims,
             )
-            if wrapper_issues:
-                audit = _CoverLetterAuditResult(issues=wrapper_issues)
-                audit.raise_if_issues()
-            claim = str(paragraph["selected_candidate_claim"])
+            result[field] = repaired
+            combined_repair_meta[field] = repair_meta
+            claim = str(repaired["selected_candidate_claim"])
             assembled_text = self._assemble_paragraph_text(
-                str(paragraph["lead_in"]),
+                str(repaired["lead_in"]),
                 claim,
-                str(paragraph["follow_up"]),
+                str(repaired["follow_up"]),
             )
             if claim not in assembled_text:
                 raise ToolArgumentsError(
@@ -2820,9 +3152,10 @@ class JobSearchAgentRuntime:
                 )
             result[field] = {
                 "text": assembled_text,
-                "reason": str(paragraph["reason"]),
+                "reason": str(repaired["reason"]),
                 "selected_candidate_claim": claim,
             }
+        self._cover_letter_wrapper_repair_meta = combined_repair_meta or None
         return result
 
     def _parse_cover_letter_wrapper_draft(
@@ -3224,10 +3557,21 @@ class JobSearchAgentRuntime:
             ),
         }
 
+    def _cover_letter_semantic_duplicate_issue_group(
+        self,
+        contract: dict[str, Any],
+        audit: _CoverLetterAuditResult | None,
+        error: str | None,
+    ) -> str:
+        return self._cover_letter_invalid_fingerprint(
+            contract,
+            audit,
+            error,
+        )
+
     def _cover_letter_invalid_fingerprint(
         self,
         contract: dict[str, Any],
-        arguments: dict[str, Any],
         audit: _CoverLetterAuditResult | None,
         error: str | None,
     ) -> str:
@@ -3238,20 +3582,13 @@ class JobSearchAgentRuntime:
         category = self._cover_letter_rejection_category(error, audit)
         issue_codes = "|".join(
             sorted(
-                f"{issue.field}:{issue.category}"
+                f"{issue.field}:{issue.code or issue.category}"
                 for issue in (audit.issues if audit else [])
             )
         )
-        normalized_args = json.dumps(
-            arguments,
-            sort_keys=True,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-        args_hash = hashlib.sha256(normalized_args.encode()).hexdigest()[:16]
         return (
             f"{contract.get('phase', '')}|{job_key}|{patch_fields}|{category}|"
-            f"{issue_codes}|{args_hash}"
+            f"{issue_codes}"
         )
 
     def _try_cover_letter_deterministic_wrapper_recovery(
@@ -4982,12 +5319,18 @@ class JobSearchAgentRuntime:
                         selected = paragraph.get("selected_candidate_claim")
                         if isinstance(selected, str) and selected in allowed_claims:
                             selected_index = allowed_claims.index(selected)
+                    repair_meta: dict[str, Any] = {}
+                    if self._cover_letter_wrapper_repair_meta:
+                        for field_meta in self._cover_letter_wrapper_repair_meta.values():
+                            if isinstance(field_meta, dict):
+                                repair_meta.update(field_meta)
                     self._last_generation_span.record.metadata = {
                         **existing,
                         "cover_letter_paragraph_assembled": True,
                         "cover_letter_claim_enum_applied": bool(allowed_claims),
                         "cover_letter_selected_claim_index": selected_index,
                         "cover_letter_claim_exact_substring_verified": True,
+                        **repair_meta,
                     }
                 execution_call = self._hydrate_cover_letter_call(
                     raw_call,
@@ -5024,6 +5367,7 @@ class JobSearchAgentRuntime:
                 self._clear_tailor_patch_recovery()
             if contract["allowed_tool"] == "generate_cover_letter":
                 self._clear_cover_patch_recovery()
+                self._cover_letter_wrapper_repair_meta = None
         except (StateInvariantError, ToolRegistryError) as exc:
             error = str(exc)
             if contract["allowed_tool"] == "tailor_resume":
@@ -5114,10 +5458,15 @@ class JobSearchAgentRuntime:
                             audit = None
                 fingerprint = self._cover_letter_invalid_fingerprint(
                     contract,
-                    raw_call.arguments,
                     audit if isinstance(audit, _CoverLetterAuditResult) else None,
                     error,
                 )
+                if self._last_generation_span is not None:
+                    existing = self._last_generation_span.record.metadata or {}
+                    self._last_generation_span.record.metadata = {
+                        **existing,
+                        "cover_letter_semantic_duplicate_issue_group": fingerprint,
+                    }
                 if fingerprint == self._cover_letter_last_invalid_fingerprint:
                     self._cover_letter_invalid_repeat_count += 1
                 else:

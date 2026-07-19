@@ -20,9 +20,12 @@ from src.agent.client import (
 from src.agent.runtime import (
     AgentLoopLimitError,
     JobSearchAgentRuntime,
+    _CoverLetterAuditIssue,
+    _CoverLetterAuditResult,
     _CoverLetterTextDraft,
     _TailorResumeTextDraftNoSwap,
     _TailorResumeTextDraftWithSwap,
+    _word_count,
 )
 from src.agent.prompts import TAILOR_RESUME_CONSTRAINTS, TAILOR_RESUME_PLAN_LIMITS
 from src.agent.state import AgentPhase, StateInvariantError
@@ -245,6 +248,53 @@ def _wrapper_paragraph(
         "follow_up": follow_up,
         "reason": reason,
     }
+
+
+def _repeat_words(count: int, *, prefix: str = "word") -> str:
+    bank = [
+        "background",
+        "experience",
+        "technical",
+        "collaborative",
+        "practical",
+        "relevant",
+        "applied",
+        "evidence",
+        "position",
+        "responsibilities",
+        "disciplined",
+        "grounded",
+        "delivery",
+        "systems",
+        "analysis",
+    ]
+    return " ".join(bank[index % len(bank)] for index in range(count))
+
+
+def _cover_draft_for_job(runtime, job_id, *, lead_in=None, follow_up=None, reason=None):
+    allowed_hook = runtime._select_allowed_company_hooks(job_id)[0]
+    claim = runtime._allowed_candidate_claim_texts(job_id)[0]
+    paragraph = _wrapper_paragraph(claim)
+    if lead_in is not None:
+        paragraph["lead_in"] = lead_in
+    if follow_up is not None:
+        paragraph["follow_up"] = follow_up
+    if reason is not None:
+        paragraph["reason"] = reason
+    skills = runtime._select_model_visible_skills(job_id)[:4]
+    return {
+        "decision_summary": "Generate cover letter.",
+        "job_id": job_id,
+        "company_hook_phrase": allowed_hook,
+        "body_paragraph_1": paragraph,
+        "skills": skills,
+        "closing_sentence": "I welcome the opportunity to discuss my fit.",
+        "plan_rationale": "Use only supplied evidence.",
+    }
+
+
+def _semantic_duplicate_group(runtime, contract, audit):
+    return runtime._cover_letter_semantic_duplicate_issue_group(contract, audit, None)
 
 
 def _claim_schema_enum(runtime, contract):
@@ -3709,61 +3759,26 @@ def test_cover_letter_initial_schema_claim_enum_matches_private_catalog(tmp_path
     assert len(enum_values) <= 5
 
 
-def test_calls_11_13_duplicate_wrapper_recovery(tmp_path, monkeypatch):
+def test_calls_11_13_same_turn_wrapper_length_repair(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
     )
     runtime = _runtime_at_cover_letter(tmp_path)
     contract, call = _valid_compact_cover_call(runtime)
-    recall_claim = _default_cover_claim_text(0)
-    allowed_claims = runtime._allowed_candidate_claim_texts(contract["target_job_id"])
-    assert recall_claim in allowed_claims
+    recall_claim = call.arguments["body_paragraph_1"]["selected_candidate_claim"]
     initial = copy.deepcopy(call.arguments)
     initial["body_paragraph_1"] = {
-        **_wrapper_paragraph(recall_claim),
-        "lead_in": (
-            "My experience in building Python and scikit-learn risk models over SQL "
-            "data pipelines, which raised validated recall by 14% while holding rates."
-        ),
+        **call.arguments["body_paragraph_1"],
+        "lead_in": _repeat_words(40, prefix="lead"),
+        "reason": _repeat_words(27, prefix="reason"),
     }
     runtime.state.model_call_count = 1
-    runtime._execute_response_calls(
+    runtime.trace = NoOpAgentTracer().start_trace("agent_run", run_id=runtime.run_id)
+    valid, invalid = runtime._execute_response_calls(
         NormalizedAssistantMessage(
             tool_calls=[_tool("generate_cover_letter", initial, 11)]
         ),
         contract,
-    )
-    assert runtime._cover_letter_patch_recovery is not None
-    patch_contract = runtime._next_action_contract()
-    properties, parameters = _cover_schema_properties(runtime, patch_contract)
-    assert properties == {"job_id", "body_paragraph_1"}
-    enum1 = _claim_schema_enum(runtime, patch_contract)
-    invalid_patch = {
-        "job_id": contract["target_job_id"],
-        "body_paragraph_1": {
-            "selected_candidate_claim": recall_claim,
-            "lead_in": "ok",
-            "follow_up": "still too short",
-            "reason": "retry",
-        },
-    }
-    runtime.state.model_call_count = 2
-    runtime._execute_response_calls(
-        NormalizedAssistantMessage(
-            tool_calls=[_tool("generate_cover_letter", invalid_patch, 12)]
-        ),
-        patch_contract,
-    )
-    patch_contract_2 = runtime._next_action_contract()
-    enum2 = _claim_schema_enum(runtime, patch_contract_2)
-    assert enum1 == enum2
-    runtime.state.model_call_count = 3
-    runtime.trace = NoOpAgentTracer().start_trace("agent_run", run_id=runtime.run_id)
-    valid, invalid = runtime._execute_response_calls(
-        NormalizedAssistantMessage(
-            tool_calls=[_tool("generate_cover_letter", invalid_patch, 13)]
-        ),
-        patch_contract_2,
     )
     assert valid == 1
     assert invalid == 0
@@ -3775,6 +3790,221 @@ def test_calls_11_13_duplicate_wrapper_recovery(tmp_path, monkeypatch):
     )
     paragraph_text = tool_span.input["arguments"]["plan"]["body_paragraphs"][0]["text"]
     assert recall_claim in paragraph_text
+    assert 35 <= _word_count(paragraph_text) <= 120
+
+
+def test_semantic_duplicate_group_ignores_wrapper_wording(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    audit_one = _CoverLetterAuditResult(
+        issues=[
+            _CoverLetterAuditIssue(
+                field="body_paragraph_1",
+                category="semantic_text",
+                code="lead_in_too_long",
+                message="lead too long",
+            )
+        ]
+    )
+    audit_two = _CoverLetterAuditResult(
+        issues=[
+            _CoverLetterAuditIssue(
+                field="body_paragraph_1",
+                category="semantic_text",
+                code="lead_in_too_long",
+                message="lead too long again",
+            )
+        ]
+    )
+    patch_contract = {
+        **contract,
+        "cover_patch_fields": ["body_paragraph_1"],
+        "cover_recovery_mode": "patch",
+    }
+    group_one = _semantic_duplicate_group(runtime, patch_contract, audit_one)
+    group_two = _semantic_duplicate_group(runtime, patch_contract, audit_two)
+    assert group_one == group_two
+
+
+def test_cover_letter_wrapper_length_repair_cases(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    job_id = contract["target_job_id"]
+    claim = runtime._allowed_candidate_claim_texts(job_id)[0]
+    allowed = runtime._allowed_candidate_claim_texts(job_id)
+    unchanged = _wrapper_paragraph(claim)
+
+    repaired, meta = runtime._repair_paragraph_wrapper_if_needed(
+        unchanged,
+        "body_paragraph_1",
+        allowed,
+    )
+    assert meta["cover_letter_wrapper_length_repair_applied"] is False
+
+    long_lead = {**unchanged, "lead_in": _repeat_words(31, prefix="lead")}
+    repaired, meta = runtime._repair_paragraph_wrapper_if_needed(
+        long_lead,
+        "body_paragraph_1",
+        allowed,
+    )
+    assert meta["cover_letter_lead_in_repaired"] is True
+    assert _word_count(repaired["lead_in"]) <= 30
+
+    exact_lead = {**unchanged, "lead_in": _repeat_words(30, prefix="lead")}
+    repaired, meta = runtime._repair_paragraph_wrapper_if_needed(
+        exact_lead,
+        "body_paragraph_1",
+        allowed,
+    )
+    assert repaired["lead_in"] == exact_lead["lead_in"]
+
+    short_lead = {**unchanged, "lead_in": "I am."}
+    repaired, meta = runtime._repair_paragraph_wrapper_if_needed(
+        short_lead,
+        "body_paragraph_1",
+        allowed,
+    )
+    assert meta["cover_letter_lead_in_repaired"] is True
+
+    long_follow = {**unchanged, "follow_up": _repeat_words(46, prefix="follow")}
+    repaired, meta = runtime._repair_paragraph_wrapper_if_needed(
+        long_follow,
+        "body_paragraph_1",
+        allowed,
+    )
+    assert meta["cover_letter_follow_up_repaired"] is True
+    assert _word_count(repaired["follow_up"]) <= 45
+
+    exact_follow = {**unchanged, "follow_up": _repeat_words(45, prefix="follow")}
+    repaired, meta = runtime._repair_paragraph_wrapper_if_needed(
+        exact_follow,
+        "body_paragraph_1",
+        allowed,
+    )
+    assert repaired["follow_up"] == exact_follow["follow_up"]
+
+    short_follow = {**unchanged, "follow_up": "Relevant experience here."}
+    repaired, meta = runtime._repair_paragraph_wrapper_if_needed(
+        short_follow,
+        "body_paragraph_1",
+        allowed,
+    )
+    assert meta["cover_letter_follow_up_repaired"] is True
+
+    long_reason = {**unchanged, "reason": _repeat_words(19, prefix="reason")}
+    repaired, meta = runtime._repair_paragraph_wrapper_if_needed(
+        long_reason,
+        "body_paragraph_1",
+        allowed,
+    )
+    assert meta["cover_letter_reason_repaired"] is True
+    assert _word_count(repaired["reason"]) <= 18
+
+    exact_reason = {**unchanged, "reason": _repeat_words(18, prefix="reason")}
+    repaired, meta = runtime._repair_paragraph_wrapper_if_needed(
+        exact_reason,
+        "body_paragraph_1",
+        allowed,
+    )
+    assert repaired["reason"] == exact_reason["reason"]
+
+    digits = {**unchanged, "lead_in": "I improved systems with 14 percent gains."}
+    with pytest.raises(Exception):
+        runtime._repair_paragraph_wrapper_if_needed(
+            digits,
+            "body_paragraph_1",
+            allowed,
+        )
+
+    transport1 = runtime._resolve_cover_letter_transport_arguments(
+        _tool(
+            "generate_cover_letter",
+            _cover_draft_for_job(runtime, job_id, lead_in=_repeat_words(40)),
+            1,
+        ),
+        contract,
+    )
+    transport2 = runtime._resolve_cover_letter_transport_arguments(
+        _tool(
+            "generate_cover_letter",
+            _cover_draft_for_job(runtime, job_id, lead_in=_repeat_words(40)),
+            2,
+        ),
+        contract,
+    )
+    assert transport1["body_paragraph_1"]["text"] == transport2["body_paragraph_1"]["text"]
+    assert claim in transport1["body_paragraph_1"]["text"]
+
+
+def test_top3_cover_letters_repair_wrapper_lengths_in_same_turn(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
+    )
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
+    )
+
+    _, scores, resume_plans, cover_plans = _workflow_plans()
+    ids = [item.job_id for item in scores]
+    bundle, _, _, _ = _workflow_plans()
+    jobs = load_jobs(ROOT / "data/AI_ML_Jobs_Dataset_20.csv")
+    accepted = filtering_tool(jobs, bundle.profile).accepted_jobs
+    accepted_by_id = {job.job_id: job for job in accepted}
+    chickasaw_id = next(
+        job_id
+        for job_id in ids
+        if accepted_by_id[job_id].company == "Chickasaw Nation Industries"
+    )
+    flash_id = next(
+        job_id for job_id in ids if accepted_by_id[job_id].company == "Flash AI"
+    )
+
+    cover_responses = []
+    for index, job_id in enumerate(ids):
+        probe = _runtime_at_cover_letter(tmp_path, rank=index + 1)
+        draft = _compact_cover_draft_from_plan(
+            cover_plans[job_id],
+            job_id,
+            allowed_hook=probe._select_allowed_company_hooks(job_id)[0],
+        )
+        if job_id == chickasaw_id:
+            draft["body_paragraph_1"] = {
+                **draft["body_paragraph_1"],
+                "lead_in": _repeat_words(40, prefix="lead"),
+                "reason": _repeat_words(27, prefix="reason"),
+            }
+        elif job_id == flash_id:
+            draft["body_paragraph_1"] = {
+                **draft["body_paragraph_1"],
+                "reason": _repeat_words(22, prefix="reason"),
+            }
+        cover_responses.append(
+            NormalizedAssistantMessage(
+                tool_calls=[_tool("generate_cover_letter", draft, 50 + index)]
+            )
+        )
+
+    responses = _responses(scores, resume_plans, cover_plans)
+    responses = responses[:-3] + cover_responses
+
+    tracer = NoOpAgentTracer()
+    client = ScriptedClient(responses)
+    runtime = _runtime(
+        tmp_path,
+        client,
+        ReviewProvider(ids[0]),
+        tracer,
+    )
+    runtime.run()
+    assert len(runtime.state.cover_letters) == 3
+    tool_calls = [
+        item
+        for item in runtime.trace.record.observations
+        if item.name == "tool_call:generate_cover_letter"
+    ]
+    assert len(tool_calls) == 3
+    for job_id in ids:
+        assert runtime.state.cover_letters[job_id].page_count == 1
 
 
 def test_cover_letter_success_path_selects_enum_without_recovery(tmp_path, monkeypatch):

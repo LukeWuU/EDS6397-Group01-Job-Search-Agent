@@ -231,6 +231,11 @@ COVER_LETTER_NORMAL_CONSTRAINTS = [
         "between them."
     ),
     (
+        "Keep wrappers concise: lead_in is normally one short sentence fragment, "
+        "follow_up one short sentence, and reason one short clause. Do not repeat "
+        "the selected claim in lead_in or follow_up."
+    ),
+    (
         "Do not reinterpret numeric claims. Never change recall, lookup time, retrieval, "
         "MAE, or other documented metrics when selecting a claim enum value."
     ),
@@ -246,8 +251,9 @@ COVER_LETTER_NORMAL_CONSTRAINTS = [
     "Python injects citations, evidence IDs, source fields, letter_date, and nested plan.",
     "Never author citation objects, source IDs, source fields, or evidence IDs.",
     (
-        "company_hook_phrase: at most 15 words; lead_in: 3–30 words; follow_up: 5–45 "
-        "words; each reason: at most 18 words; closing_sentence: at most 25 words; "
+        "company_hook_phrase: at most 15 words; lead_in: normally one short fragment "
+        "(3–30 words); follow_up: normally one short sentence (5–45 words); reason: "
+        "one short clause (at most 18 words); closing_sentence: at most 25 words; "
         "plan_rationale: at most 25 words."
     ),
     "No prose outside the tool call.",
