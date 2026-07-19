@@ -4045,3 +4045,385 @@ def test_cover_letter_top3_payload_claim_count_and_no_duplicate_list(tmp_path):
         assert _claim_schema_enum(runtime, contract) == contract["allowed_candidate_claims"]
         checkpoint_payload = json.dumps(checkpoint, separators=(",", ":"))
         assert "allowed_candidate_claims" not in checkpoint_payload
+
+
+FLASH_CALL_13_CLAIM = (
+    "Built Python and scikit-learn risk models over SQL data pipelines, raising "
+    "validated recall by 14% while holding the false-positive rate constant."
+)
+
+
+def _flash_call_13_draft(runtime, job_id, *, lead_in=None, follow_up=None, reason=None):
+    allowed_hook = runtime._select_allowed_company_hooks(job_id)[0]
+    visible_skills = runtime._select_model_visible_skills(job_id)
+    skills = visible_skills[:4]
+    assert len(skills) >= 3
+    paragraph = _wrapper_paragraph(
+        FLASH_CALL_13_CLAIM,
+        lead_in=lead_in
+        or "My background aligns with the practical responsibilities of this role.",
+        follow_up=follow_up or "This experience is directly relevant to the position.",
+        reason=reason or "Connects verified evidence to role requirements.",
+    )
+    return {
+        "decision_summary": "Generate cover letter.",
+        "job_id": job_id,
+        "company_hook_phrase": allowed_hook,
+        "body_paragraph_1": paragraph,
+        "skills": skills,
+        "closing_sentence": "I welcome the opportunity to discuss my fit.",
+        "plan_rationale": "Use only supplied evidence.",
+    }
+
+
+def _evidence_duplicate_group(runtime, contract, audit):
+    return runtime._cover_letter_semantic_duplicate_issue_group(contract, audit, None)
+
+
+def test_flash_call_13_exact_claim_excludes_data_pipelines_from_skill_scan(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
+    )
+    runtime = _runtime_at_cover_letter(tmp_path)
+    ids = runtime.state.top_3_job_ids
+    flash_id = next(
+        job_id
+        for job_id in ids
+        if runtime.registry._job(job_id).company == "Flash AI"
+    )
+    runtime.state.cover_letters = {
+        ids[index]: object() for index, job_id in enumerate(ids) if job_id != flash_id
+    }
+    contract = runtime._next_action_contract()
+    assert contract["target_job_id"] == flash_id
+    draft = _flash_call_13_draft(runtime, flash_id)
+    assert draft["body_paragraph_1"]["selected_candidate_claim"] == FLASH_CALL_13_CLAIM
+    runtime.state.model_call_count = 1
+    runtime.trace = NoOpAgentTracer().start_trace("agent_run", run_id=runtime.run_id)
+    valid, invalid = runtime._execute_response_calls(
+        NormalizedAssistantMessage(
+            tool_calls=[_tool("generate_cover_letter", draft, 13)]
+        ),
+        contract,
+    )
+    assert valid == 1
+    assert invalid == 0
+    assert runtime._cover_letter_patch_recovery is None
+    tool_span = next(
+        item
+        for item in runtime.trace.record.observations
+        if item.name == "tool_call:generate_cover_letter"
+    )
+    paragraph_text = tool_span.input["arguments"]["plan"]["body_paragraphs"][0]["text"]
+    assert FLASH_CALL_13_CLAIM in paragraph_text
+    assert paragraph_text.count(FLASH_CALL_13_CLAIM) == 1
+    assert runtime.state.cover_letters[flash_id].page_count == 1
+
+
+def test_evidence_duplicate_group_ignores_wrapper_wording(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    audit_one = _CoverLetterAuditResult(
+        issues=[
+            _CoverLetterAuditIssue(
+                field="body_paragraph_1",
+                category="evidence",
+                code="unsupported_skill_in_free_text",
+                message="unsupported in lead one",
+            )
+        ]
+    )
+    audit_two = _CoverLetterAuditResult(
+        issues=[
+            _CoverLetterAuditIssue(
+                field="body_paragraph_1",
+                category="evidence",
+                code="unsupported_skill_in_free_text",
+                message="unsupported in lead two",
+            )
+        ]
+    )
+    patch_contract = {
+        **contract,
+        "cover_patch_fields": ["body_paragraph_1"],
+        "cover_recovery_mode": "patch",
+    }
+    group_one = _evidence_duplicate_group(runtime, patch_contract, audit_one)
+    group_two = _evidence_duplicate_group(runtime, patch_contract, audit_two)
+    assert group_one == group_two
+
+
+def test_exact_claim_span_rejects_unsupported_skill_in_lead_in(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    ids = runtime.state.top_3_job_ids
+    flash_id = next(
+        job_id
+        for job_id in ids
+        if runtime.registry._job(job_id).company == "Flash AI"
+    )
+    runtime.state.cover_letters = {
+        ids[index]: object() for index, job_id in enumerate(ids) if job_id != flash_id
+    }
+    contract = runtime._next_action_contract()
+    job_id = contract["target_job_id"]
+    assert job_id == flash_id
+    draft = _flash_call_13_draft(
+        runtime,
+        job_id,
+        lead_in="My data pipelines expertise is ideally suited to this role.",
+    )
+    transport = runtime._resolve_cover_letter_transport_arguments(
+        _tool("generate_cover_letter", draft, 1),
+        contract,
+    )
+    with pytest.raises(StateInvariantError, match="claims required skill"):
+        runtime._validate_cover_letter_exact_claim_spans(
+            runtime._build_hydrated_cover_letter_plan(transport, job_id),
+            job_id,
+            runtime._selected_claims_from_transport(transport),
+        )
+
+
+def test_exact_claim_span_rejects_unsupported_skill_in_follow_up(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    ids = runtime.state.top_3_job_ids
+    flash_id = next(
+        job_id
+        for job_id in ids
+        if runtime.registry._job(job_id).company == "Flash AI"
+    )
+    runtime.state.cover_letters = {
+        ids[index]: object() for index, job_id in enumerate(ids) if job_id != flash_id
+    }
+    contract = runtime._next_action_contract()
+    job_id = contract["target_job_id"]
+    assert job_id == flash_id
+    draft = _flash_call_13_draft(
+        runtime,
+        job_id,
+        follow_up=(
+            "I have also built reliable data pipelines for investigative AI workflows."
+        ),
+    )
+    transport = runtime._resolve_cover_letter_transport_arguments(
+        _tool("generate_cover_letter", draft, 1),
+        contract,
+    )
+    with pytest.raises(StateInvariantError, match="claims required skill"):
+        runtime._validate_cover_letter_exact_claim_spans(
+            runtime._build_hydrated_cover_letter_plan(transport, job_id),
+            job_id,
+            runtime._selected_claims_from_transport(transport),
+        )
+
+
+def test_exact_claim_span_rejects_repeated_claim(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    claim = FLASH_CALL_13_CLAIM
+    text = f"Lead. {claim} {claim} Follow."
+    with pytest.raises(StateInvariantError, match="exact_claim_repeated"):
+        runtime._split_paragraph_exact_claim_span(text, claim)
+
+
+def test_exact_claim_span_rejects_missing_claim(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    with pytest.raises(StateInvariantError, match="exact_claim_missing"):
+        runtime._split_paragraph_exact_claim_span(
+            "Lead without the selected claim. Follow.",
+            FLASH_CALL_13_CLAIM,
+        )
+
+
+def test_exact_claim_span_rejects_missing_catalog_entry(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    job_id = contract["target_job_id"]
+    with pytest.raises(StateInvariantError, match="exact_claim_evidence_missing"):
+        runtime._paragraph_claim_evidence_verified(
+            "Unsupported claim text without evidence mapping.",
+            job_id,
+            [],
+        )
+
+
+def test_exact_claim_span_rejects_missing_candidate_citation(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    job_id = contract["target_job_id"]
+    draft = _flash_call_13_draft(runtime, job_id)
+    transport = runtime._resolve_cover_letter_transport_arguments(
+        _tool("generate_cover_letter", draft, 1),
+        contract,
+    )
+    plan = runtime._build_hydrated_cover_letter_plan(transport, job_id)
+    plan["body_paragraphs"][0]["citations"] = [
+        citation
+        for citation in plan["body_paragraphs"][0]["citations"]
+        if citation.get("source_type") == "job_posting"
+    ]
+    with pytest.raises(StateInvariantError, match="exact_claim_citation_missing"):
+        runtime._validate_cover_letter_exact_claim_spans(
+            plan,
+            job_id,
+            runtime._selected_claims_from_transport(transport),
+        )
+
+
+def test_exact_claim_span_rejects_numeric_metric_outside_claim(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract, call = _valid_compact_cover_call(runtime)
+    job_id = contract["target_job_id"]
+    claim = call.arguments["body_paragraph_1"]["selected_candidate_claim"]
+    follow_up = (
+        call.arguments["body_paragraph_1"]["follow_up"]
+        + " I improved production systems, achieving a 14% improvement in query response accuracy."
+    )
+    assembled = runtime._assemble_paragraph_text(
+        call.arguments["body_paragraph_1"]["lead_in"],
+        claim,
+        follow_up,
+    )
+    issue = runtime._audit_numeric_claim_integrity(assembled, job_id)
+    assert issue is not None
+    assert "14" in issue or "metric" in issue.casefold() or "numeric" in issue.casefold()
+
+
+def test_exact_claim_span_rejects_partial_claim_substring_only(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    job_id = contract["target_job_id"]
+    draft = _flash_call_13_draft(runtime, job_id)
+    transport = runtime._resolve_cover_letter_transport_arguments(
+        _tool("generate_cover_letter", draft, 1),
+        contract,
+    )
+    plan = runtime._build_hydrated_cover_letter_plan(transport, job_id)
+    partial = FLASH_CALL_13_CLAIM[:40]
+    plan["body_paragraphs"][0]["text"] = plan["body_paragraphs"][0]["text"].replace(
+        FLASH_CALL_13_CLAIM,
+        partial,
+    )
+    with pytest.raises(StateInvariantError, match="exact_claim_missing"):
+        runtime._validate_cover_letter_exact_claim_spans(
+            plan,
+            job_id,
+            runtime._selected_claims_from_transport(transport),
+        )
+
+
+def test_exact_claim_span_rejects_unsupported_skill_in_closing(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    ids = runtime.state.top_3_job_ids
+    flash_id = next(
+        job_id
+        for job_id in ids
+        if runtime.registry._job(job_id).company == "Flash AI"
+    )
+    runtime.state.cover_letters = {
+        ids[index]: object() for index, job_id in enumerate(ids) if job_id != flash_id
+    }
+    contract = runtime._next_action_contract()
+    job_id = contract["target_job_id"]
+    assert job_id == flash_id
+    draft = _flash_call_13_draft(runtime, job_id)
+    draft["closing_sentence"] = (
+        "I would welcome discussing my data pipelines experience with your team."
+    )
+    transport = runtime._resolve_cover_letter_transport_arguments(
+        _tool("generate_cover_letter", draft, 1),
+        contract,
+    )
+    with pytest.raises(StateInvariantError, match="claims required skill"):
+        runtime._validate_cover_letter_exact_claim_spans(
+            runtime._build_hydrated_cover_letter_plan(transport, job_id),
+            job_id,
+            runtime._selected_claims_from_transport(transport),
+        )
+
+
+def test_exact_claim_span_is_paragraph_local_for_two_paragraphs(tmp_path):
+    runtime = _runtime_at_cover_letter(tmp_path)
+    contract = _cover_letter_contract(runtime)
+    job_id = contract["target_job_id"]
+    claims = runtime._allowed_candidate_claim_texts(job_id)
+    assert len(claims) >= 2
+    draft = _flash_call_13_draft(runtime, job_id)
+    draft["body_paragraph_2"] = _wrapper_paragraph(
+        claims[1],
+        lead_in="Secondary lead for the second paragraph.",
+        follow_up="Secondary follow-up for the second paragraph.",
+    )
+    transport = runtime._resolve_cover_letter_transport_arguments(
+        _tool("generate_cover_letter", draft, 1),
+        contract,
+    )
+    plan = runtime._build_hydrated_cover_letter_plan(transport, job_id)
+    meta = runtime._validate_cover_letter_exact_claim_spans(
+        plan,
+        job_id,
+        runtime._selected_claims_from_transport(transport),
+    )
+    assert meta["cover_letter_exact_claim_occurrence_count"] == 2
+
+
+def test_top3_cover_letters_with_flash_data_pipelines_claim(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.cover_letter.compile_cover_letter_pdf", fake_cover_compiler
+    )
+    monkeypatch.setattr(
+        "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
+    )
+
+    _, scores, resume_plans, cover_plans = _workflow_plans()
+    ids = [item.job_id for item in scores]
+    bundle, _, _, _ = _workflow_plans()
+    jobs = load_jobs(ROOT / "data/AI_ML_Jobs_Dataset_20.csv")
+    accepted = filtering_tool(jobs, bundle.profile).accepted_jobs
+    accepted_by_id = {job.job_id: job for job in accepted}
+    flash_id = next(
+        job_id for job_id in ids if accepted_by_id[job_id].company == "Flash AI"
+    )
+
+    cover_responses = []
+    for index, job_id in enumerate(ids):
+        probe = _runtime_at_cover_letter(tmp_path, rank=index + 1)
+        if job_id == flash_id:
+            draft = _flash_call_13_draft(probe, job_id)
+        else:
+            draft = _compact_cover_draft_from_plan(
+                cover_plans[job_id],
+                job_id,
+                allowed_hook=probe._select_allowed_company_hooks(job_id)[0],
+                primary_claim=probe._allowed_candidate_claim_texts(job_id)[0],
+            )
+        cover_responses.append(
+            NormalizedAssistantMessage(
+                tool_calls=[_tool("generate_cover_letter", draft, 50 + index)]
+            )
+        )
+
+    responses = _responses(scores, resume_plans, cover_plans)
+    responses = responses[:-3] + cover_responses
+
+    tracer = NoOpAgentTracer()
+    client = ScriptedClient(responses)
+    runtime = _runtime(
+        tmp_path,
+        client,
+        ReviewProvider(ids[0]),
+        tracer,
+    )
+    runtime.run()
+    assert len(runtime.state.cover_letters) == 3
+    tool_calls = [
+        item
+        for item in runtime.trace.record.observations
+        if item.name == "tool_call:generate_cover_letter"
+    ]
+    assert len(tool_calls) == 3
+    flash_paragraph = tool_calls[-1].input["arguments"]["plan"]["body_paragraphs"][0]["text"]
+    assert FLASH_CALL_13_CLAIM in flash_paragraph
+    for job_id in ids:
+        assert runtime.state.cover_letters[job_id].page_count == 1

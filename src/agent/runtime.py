@@ -51,6 +51,7 @@ from src.tools.cover_letter import (
     _citation_supports_skill,
     _normalize_phrase,
     _skill_is_job_relevant,
+    _validate_required_skill_claims,
     validate_cover_letter_plan,
 )
 from src.tools.filtering import normalize_title
@@ -675,6 +676,8 @@ class JobSearchAgentRuntime:
         self._cover_letter_last_invalid_fingerprint: str | None = None
         self._cover_letter_invalid_repeat_count = 0
         self._cover_letter_wrapper_repair_meta: dict[str, Any] | None = None
+        self._cover_letter_preexecution_meta: dict[str, Any] | None = None
+        self._cover_letter_claim_skill_validation_map: dict[str, str] | None = None
         self._cover_letter_date = cover_letter_date or date.today()
 
     @staticmethod
@@ -2103,10 +2106,368 @@ class JobSearchAgentRuntime:
     def _paragraph_has_allowed_candidate_claim(self, text: str, job_id: str) -> bool:
         return bool(self._detect_allowed_claims_in_text(text, job_id))
 
+    @staticmethod
+    def _count_exact_substring_occurrences(text: str, substring: str) -> int:
+        if not substring:
+            return 0
+        count = 0
+        start = 0
+        while True:
+            index = text.find(substring, start)
+            if index == -1:
+                return count
+            count += 1
+            start = index + len(substring)
+
+    @staticmethod
+    def _cover_citation_locator_key(citation: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            citation.get("source_type"),
+            citation.get("source_id"),
+            citation.get("source_field"),
+            citation.get("evidence_id"),
+        )
+
+    @staticmethod
+    def _selected_claims_from_transport(
+        transport_args: dict[str, Any],
+    ) -> list[str | None]:
+        claims: list[str | None] = []
+        for field in ("body_paragraph_1", "body_paragraph_2"):
+            paragraph = transport_args.get(field)
+            if not isinstance(paragraph, dict):
+                continue
+            selected = paragraph.get("selected_candidate_claim")
+            if isinstance(selected, str) and selected.strip():
+                claims.append(selected)
+            else:
+                claims.append(None)
+        return claims
+
+    def _claim_catalog_entry(
+        self,
+        selected_claim: str,
+        job_id: str,
+    ) -> _AllowedCandidateClaim | None:
+        for entry in self._build_allowed_candidate_claims(job_id):
+            if entry.claim_text == selected_claim:
+                return entry
+        return None
+
+    def _split_paragraph_exact_claim_span(
+        self,
+        text: str,
+        selected_claim: str,
+    ) -> tuple[str, str, str]:
+        occurrences = self._count_exact_substring_occurrences(text, selected_claim)
+        if occurrences == 0:
+            raise StateInvariantError(
+                "Cover letter pre-execution validation rejection: exact_claim_missing"
+            )
+        if occurrences > 1:
+            raise StateInvariantError(
+                "Cover letter pre-execution validation rejection: exact_claim_repeated"
+            )
+        index = text.index(selected_claim)
+        prefix = text[:index]
+        suffix = text[index + len(selected_claim) :]
+        return prefix, selected_claim, suffix
+
+    def _paragraph_free_text_for_skill_scan(
+        self,
+        text: str,
+        selected_claim: str,
+    ) -> str:
+        prefix, _, suffix = self._split_paragraph_exact_claim_span(text, selected_claim)
+        return " ".join(part for part in (prefix.strip(), suffix.strip()) if part)
+
+    def _paragraph_claim_evidence_verified(
+        self,
+        selected_claim: str,
+        job_id: str,
+        paragraph_citations: list[Any],
+    ) -> _AllowedCandidateClaim:
+        entry = self._claim_catalog_entry(selected_claim, job_id)
+        if entry is None:
+            raise StateInvariantError(
+                "Cover letter pre-execution validation rejection: "
+                "exact_claim_evidence_missing"
+            )
+        citation_dicts = [
+            citation for citation in paragraph_citations if isinstance(citation, dict)
+        ]
+        paragraph_keys = {
+            self._cover_citation_locator_key(citation) for citation in citation_dicts
+        }
+        candidate_keys = {
+            key
+            for key in paragraph_keys
+            if key[0]
+            not in {
+                "job_posting",
+                "company_details",
+                "fit_analysis",
+                "finalized_resume",
+            }
+        }
+        for citation in entry.citations:
+            key = self._cover_citation_locator_key(citation)
+            if key not in paragraph_keys:
+                raise StateInvariantError(
+                    "Cover letter pre-execution validation rejection: "
+                    "exact_claim_citation_missing"
+                )
+            if key not in candidate_keys:
+                raise StateInvariantError(
+                    "Cover letter pre-execution validation rejection: "
+                    "exact_claim_citation_missing"
+                )
+        return entry
+
+    def _audit_paragraph_free_text_skills(
+        self,
+        free_text: str,
+        job_id: str,
+        *,
+        field: str,
+        citations: list[Any],
+    ) -> _CoverLetterAuditIssue | None:
+        if not free_text.strip():
+            return None
+        assert self.registry is not None
+        job = self.registry._job(job_id)
+        fit_analysis = self._build_resume_execution_fit_analysis(job_id)
+        validated_citations = [
+            CoverLetterCitation.model_validate(citation)
+            for citation in citations
+            if isinstance(citation, dict)
+        ]
+        try:
+            _validate_required_skill_claims(
+                free_text,
+                validated_citations,
+                job=job,
+                fit_analysis=fit_analysis,
+                bundle=self.registry.bundle,
+                memory=self.registry.memory,
+            )
+        except CoverLetterEvidenceError as exc:
+            message = str(exc)
+            if (
+                "claims required skill" in message
+                or "presents genuine-gap capability" in message
+            ):
+                return _CoverLetterAuditIssue(
+                    field=field,
+                    category="evidence",
+                    code="unsupported_skill_in_free_text",
+                    message=f"{field} {message}",
+                )
+            raise StateInvariantError(
+                f"Cover letter pre-execution validation rejection: {message}"
+            ) from exc
+        return None
+
+    def _validate_cover_letter_exact_claim_spans(
+        self,
+        plan_dict: dict[str, Any],
+        job_id: str,
+        selected_claims: list[str | None],
+    ) -> dict[str, Any]:
+        assert self.registry is not None
+        paragraphs = plan_dict.get("body_paragraphs") or []
+        if len(selected_claims) < len(paragraphs):
+            selected_claims = [
+                *selected_claims,
+                *([None] * (len(paragraphs) - len(selected_claims))),
+            ]
+        reconciled = self._reconcile_tailoring_evidence(job_id)
+        skill_citations = [
+            citation
+            for skill in plan_dict.get("skills") or []
+            if isinstance(skill, dict)
+            for citation in skill.get("citations") or []
+            if isinstance(citation, dict)
+        ]
+        hook_citations = [
+            {
+                "source_type": "company_details",
+                "source_id": job_id,
+                "source_field": str(
+                    plan_dict.get("company_hook_source_field", "company_details")
+                ),
+                "evidence_id": None,
+            }
+        ]
+        meta: dict[str, Any] = {
+            "cover_letter_exact_claim_span_verified": False,
+            "cover_letter_exact_claim_occurrence_count": 0,
+            "cover_letter_exact_claim_evidence_verified": False,
+            "cover_letter_exact_claim_citation_verified": False,
+            "cover_letter_free_text_skill_scan_applied": False,
+            "cover_letter_validated_claim_excluded_from_free_text_scan": False,
+            "cover_letter_unsupported_skill_outside_claim_detected": False,
+            "cover_letter_unsupported_skill_only_inside_validated_claim": False,
+        }
+        occurrence_total = 0
+        for index, paragraph in enumerate(paragraphs):
+            if not isinstance(paragraph, dict):
+                continue
+            field = f"body_paragraph_{index + 1}"
+            text = str(paragraph.get("text", ""))
+            selected_claim = selected_claims[index]
+            if not isinstance(selected_claim, str) or not selected_claim:
+                raise StateInvariantError(
+                    "Cover letter pre-execution validation rejection: exact_claim_missing"
+                )
+            prefix, _, suffix = self._split_paragraph_exact_claim_span(
+                text,
+                selected_claim,
+            )
+            occurrence_total += 1
+            self._paragraph_claim_evidence_verified(
+                selected_claim,
+                job_id,
+                list(paragraph.get("citations") or []),
+            )
+            paragraph_citations = list(paragraph.get("citations") or [])
+            meta["cover_letter_free_text_skill_scan_applied"] = True
+            for segment_name, segment in (("lead_in", prefix), ("follow_up", suffix)):
+                issue = self._audit_paragraph_free_text_skills(
+                    segment,
+                    job_id,
+                    field=field,
+                    citations=paragraph_citations,
+                )
+                if issue is not None:
+                    meta["cover_letter_unsupported_skill_outside_claim_detected"] = True
+                    raise StateInvariantError(
+                        "Cover letter pre-execution validation rejection: "
+                        f"{issue.message}"
+                    )
+            free_text = self._paragraph_free_text_for_skill_scan(text, selected_claim)
+            full_scan_failed = False
+            free_scan_failed = False
+            try:
+                _validate_required_skill_claims(
+                    text,
+                    [
+                        CoverLetterCitation.model_validate(citation)
+                        for citation in paragraph_citations
+                        if isinstance(citation, dict)
+                    ],
+                    job=self.registry._job(job_id),
+                    fit_analysis=self._build_resume_execution_fit_analysis(job_id),
+                    bundle=self.registry.bundle,
+                    memory=self.registry.memory,
+                )
+            except CoverLetterEvidenceError:
+                full_scan_failed = True
+            try:
+                _validate_required_skill_claims(
+                    free_text,
+                    [
+                        CoverLetterCitation.model_validate(citation)
+                        for citation in paragraph_citations
+                        if isinstance(citation, dict)
+                    ],
+                    job=self.registry._job(job_id),
+                    fit_analysis=self._build_resume_execution_fit_analysis(job_id),
+                    bundle=self.registry.bundle,
+                    memory=self.registry.memory,
+                )
+            except CoverLetterEvidenceError:
+                free_scan_failed = True
+            if full_scan_failed and not free_scan_failed:
+                meta["cover_letter_validated_claim_excluded_from_free_text_scan"] = True
+                meta[
+                    "cover_letter_unsupported_skill_only_inside_validated_claim"
+                ] = True
+            for segment_name, segment in (("lead_in", prefix), ("follow_up", suffix)):
+                gap = self._text_claims_genuine_gap(segment, reconciled)
+                if gap is not None:
+                    raise StateInvariantError(
+                        "Cover letter pre-execution validation rejection: "
+                        f"{field}.{segment_name} claims genuine-gap skill {gap!r}"
+                    )
+        hook = str(plan_dict.get("company_hook_phrase", ""))
+        closing = str(plan_dict.get("closing_sentence", ""))
+        hook_issue = self._audit_paragraph_free_text_skills(
+            hook,
+            job_id,
+            field="company_hook_phrase",
+            citations=hook_citations + skill_citations,
+        )
+        if hook_issue is not None:
+            meta["cover_letter_unsupported_skill_outside_claim_detected"] = True
+            raise StateInvariantError(
+                "Cover letter pre-execution validation rejection: "
+                f"{hook_issue.message}"
+            )
+        closing_issue = self._audit_paragraph_free_text_skills(
+            closing,
+            job_id,
+            field="closing_sentence",
+            citations=skill_citations,
+        )
+        if closing_issue is not None:
+            meta["cover_letter_unsupported_skill_outside_claim_detected"] = True
+            raise StateInvariantError(
+                "Cover letter pre-execution validation rejection: "
+                f"{closing_issue.message}"
+            )
+        meta["cover_letter_exact_claim_span_verified"] = occurrence_total > 0
+        meta["cover_letter_exact_claim_occurrence_count"] = occurrence_total
+        meta["cover_letter_exact_claim_evidence_verified"] = occurrence_total > 0
+        meta["cover_letter_exact_claim_citation_verified"] = occurrence_total > 0
+        return meta
+
+    @contextmanager
+    def _claim_aware_required_skill_validation(
+        self,
+        selected_claims_by_text: dict[str, str],
+    ) -> Iterator[None]:
+        import src.tools.cover_letter as cover_letter_module
+
+        original = cover_letter_module._validate_required_skill_claims
+
+        def patched(
+            text: str,
+            citations: list[Any],
+            *,
+            job: Any,
+            fit_analysis: Any,
+            bundle: Any,
+            memory: Any,
+        ) -> None:
+            selected_claim = selected_claims_by_text.get(text)
+            scan_text = (
+                self._paragraph_free_text_for_skill_scan(text, selected_claim)
+                if selected_claim
+                else text
+            )
+            return original(
+                scan_text,
+                citations,
+                job=job,
+                fit_analysis=fit_analysis,
+                bundle=bundle,
+                memory=memory,
+            )
+
+        cover_letter_module._validate_required_skill_claims = patched
+        try:
+            yield
+        finally:
+            cover_letter_module._validate_required_skill_claims = original
+
     def _prevalidate_hydrated_cover_letter_plan(
         self,
         plan_dict: dict[str, Any],
         job_id: str,
+        *,
+        transport_args: dict[str, Any] | None = None,
+        selected_claims: list[str | None] | None = None,
     ) -> None:
         assert self.registry is not None
         assert self.state is not None
@@ -2116,6 +2477,14 @@ class JobSearchAgentRuntime:
         )
         fit_analysis = self._build_resume_execution_fit_analysis(job_id)
         finalized = self.state.finalized_resumes[job_id]
+        resolved_claims = list(selected_claims or [])
+        if not resolved_claims and transport_args is not None:
+            resolved_claims = self._selected_claims_from_transport(transport_args)
+        preexecution_meta = self._validate_cover_letter_exact_claim_spans(
+            plan_dict,
+            job_id,
+            resolved_claims,
+        )
         plan = CoverLetterPlan.model_validate(plan_dict)
         try:
             validate_cover_letter_plan(
@@ -2135,6 +2504,22 @@ class JobSearchAgentRuntime:
             raise StateInvariantError(
                 f"Cover letter pre-execution validation rejection: {exc}"
             ) from exc
+        self._cover_letter_preexecution_meta = preexecution_meta
+
+    def _selected_claims_by_paragraph_text(
+        self,
+        plan_dict: dict[str, Any],
+        transport_args: dict[str, Any] | None,
+    ) -> dict[str, str]:
+        claims = self._selected_claims_from_transport(transport_args or {})
+        mapping: dict[str, str] = {}
+        for index, paragraph in enumerate(plan_dict.get("body_paragraphs") or []):
+            if not isinstance(paragraph, dict):
+                continue
+            selected = claims[index] if index < len(claims) else None
+            if isinstance(selected, str) and selected:
+                mapping[str(paragraph.get("text", ""))] = selected
+        return mapping
 
     def _infer_cover_paragraph_field_from_error(self, error: str) -> str | None:
         lowered = error.casefold()
@@ -3643,10 +4028,20 @@ class JobSearchAgentRuntime:
                 execution_call,
                 contract,
             )
-            self._prevalidate_hydrated_cover_letter_plan(
-                execution_call.arguments["plan"],
-                target_job_id,
+            self._cover_letter_claim_skill_validation_map = (
+                self._selected_claims_by_paragraph_text(
+                    execution_call.arguments["plan"],
+                    transport_args,
+                )
             )
+            with self._claim_aware_required_skill_validation(
+                self._cover_letter_claim_skill_validation_map
+            ):
+                self._prevalidate_hydrated_cover_letter_plan(
+                    execution_call.arguments["plan"],
+                    target_job_id,
+                    transport_args=transport_args,
+                )
             self._validate_call_for_contract(execution_call, contract)
             baseline_arguments = self.registry.parse_arguments(
                 execution_call.name,
@@ -3791,6 +4186,9 @@ class JobSearchAgentRuntime:
         reconciled = self._reconcile_tailoring_evidence(target_job_id)
         skill_registry = self._build_cover_letter_allowed_skill_registry(target_job_id)
         issues: list[_CoverLetterAuditIssue] = []
+        transport_skills = transport_args.get("skills")
+        if not isinstance(transport_skills, list):
+            transport_skills = []
         if transport_args.get("job_id") != target_job_id:
             issues.append(
                 _CoverLetterAuditIssue(
@@ -3905,31 +4303,100 @@ class JobSearchAgentRuntime:
                         message=f"{field} {numeric_issue}",
                     )
                 )
-            gap = self._text_claims_genuine_gap(text, reconciled)
-            if gap is not None:
-                issues.append(
-                    _CoverLetterAuditIssue(
-                        field=field,
-                        category="evidence",
-                        message=f"{field} claims genuine-gap skill {gap!r}",
+            if isinstance(selected_claim, str) and selected_claim:
+                try:
+                    prefix, _, suffix = self._split_paragraph_exact_claim_span(
+                        text,
+                        selected_claim,
                     )
-                )
-            unsupported = self._text_claims_unsupported_required_skill(
-                text,
-                target_job_id,
-                bullet_corpus=bullet_corpus,
-            )
-            if unsupported is not None:
-                issues.append(
-                    _CoverLetterAuditIssue(
-                        field=field,
-                        category="evidence",
-                        message=(
-                            f"{field} claims unsupported required skill "
-                            f"{unsupported!r}"
-                        ),
+                    skill_items = [
+                        {
+                            "skill": skill,
+                            "citations": [
+                                copy.deepcopy(
+                                    skill_registry[
+                                        normalize_skill(skill, has_vector_search=True)
+                                        or skill.casefold()
+                                    ].citation
+                                )
+                            ],
+                        }
+                        for skill in transport_skills
+                        if isinstance(skill, str)
+                        and (
+                            normalize_skill(skill, has_vector_search=True)
+                            or skill.casefold()
+                        )
+                        in skill_registry
+                    ]
+                    paragraph_citations = self._close_paragraph_citations(
+                        target_job_id,
+                        text,
+                        skill_items,
+                        selected_claim=selected_claim,
                     )
+                    for segment in (prefix, suffix):
+                        issue = self._audit_paragraph_free_text_skills(
+                            segment,
+                            target_job_id,
+                            field=field,
+                            citations=paragraph_citations,
+                        )
+                        if issue is not None:
+                            issues.append(issue)
+                            break
+                        segment_gap = self._text_claims_genuine_gap(segment, reconciled)
+                        if segment_gap is not None:
+                            issues.append(
+                                _CoverLetterAuditIssue(
+                                    field=field,
+                                    category="evidence",
+                                    message=(
+                                        f"{field} claims genuine-gap skill "
+                                        f"{segment_gap!r}"
+                                    ),
+                                )
+                            )
+                            break
+                except StateInvariantError as exc:
+                    code = "exact_claim_missing"
+                    message = str(exc)
+                    if "exact_claim_repeated" in message:
+                        code = "exact_claim_repeated"
+                    issues.append(
+                        _CoverLetterAuditIssue(
+                            field=field,
+                            category="evidence",
+                            code=code,
+                            message=message.split("rejection: ", 1)[-1],
+                        )
+                    )
+            else:
+                gap = self._text_claims_genuine_gap(text, reconciled)
+                if gap is not None:
+                    issues.append(
+                        _CoverLetterAuditIssue(
+                            field=field,
+                            category="evidence",
+                            message=f"{field} claims genuine-gap skill {gap!r}",
+                        )
+                    )
+                unsupported = self._text_claims_unsupported_required_skill(
+                    text,
+                    target_job_id,
+                    bullet_corpus=bullet_corpus,
                 )
+                if unsupported is not None:
+                    issues.append(
+                        _CoverLetterAuditIssue(
+                            field=field,
+                            category="evidence",
+                            message=(
+                                f"{field} claims unsupported required skill "
+                                f"{unsupported!r}"
+                            ),
+                        )
+                    )
         skills = transport_args.get("skills")
         if not isinstance(skills, list):
             issues.append(
@@ -5342,15 +5809,27 @@ class JobSearchAgentRuntime:
                     execution_call,
                     contract,
                 )
-                self._prevalidate_hydrated_cover_letter_plan(
-                    execution_call.arguments["plan"],
-                    contract["target_job_id"],
+                self._cover_letter_claim_skill_validation_map = (
+                    self._selected_claims_by_paragraph_text(
+                        execution_call.arguments["plan"],
+                        transport_args,
+                    )
                 )
+                with self._claim_aware_required_skill_validation(
+                    self._cover_letter_claim_skill_validation_map
+                ):
+                    self._prevalidate_hydrated_cover_letter_plan(
+                        execution_call.arguments["plan"],
+                        contract["target_job_id"],
+                        transport_args=transport_args,
+                    )
                 if self._last_generation_span is not None:
                     existing = self._last_generation_span.record.metadata or {}
+                    preexecution_meta = self._cover_letter_preexecution_meta or {}
                     self._last_generation_span.record.metadata = {
                         **existing,
                         "cover_letter_preexecution_validation_passed": True,
+                        **preexecution_meta,
                     }
             self._validate_call_for_contract(execution_call, contract)
             baseline_arguments = self.registry.parse_arguments(
@@ -5368,6 +5847,8 @@ class JobSearchAgentRuntime:
             if contract["allowed_tool"] == "generate_cover_letter":
                 self._clear_cover_patch_recovery()
                 self._cover_letter_wrapper_repair_meta = None
+                self._cover_letter_preexecution_meta = None
+                self._cover_letter_claim_skill_validation_map = None
         except (StateInvariantError, ToolRegistryError) as exc:
             error = str(exc)
             if contract["allowed_tool"] == "tailor_resume":
@@ -5463,10 +5944,19 @@ class JobSearchAgentRuntime:
                 )
                 if self._last_generation_span is not None:
                     existing = self._last_generation_span.record.metadata or {}
-                    self._last_generation_span.record.metadata = {
+                    rejection_category = self._cover_letter_rejection_category(
+                        error,
+                        audit if isinstance(audit, _CoverLetterAuditResult) else None,
+                    )
+                    duplicate_metadata = {
                         **existing,
                         "cover_letter_semantic_duplicate_issue_group": fingerprint,
                     }
+                    if rejection_category == "evidence":
+                        duplicate_metadata[
+                            "cover_letter_evidence_duplicate_issue_group"
+                        ] = fingerprint
+                    self._last_generation_span.record.metadata = duplicate_metadata
                 if fingerprint == self._cover_letter_last_invalid_fingerprint:
                     self._cover_letter_invalid_repeat_count += 1
                 else:
@@ -5790,14 +6280,16 @@ class JobSearchAgentRuntime:
                             reconciled.category_conflicts_resolved
                         ),
                     }
-                    outcome = self.registry.execute(
-                        call.name,
-                        call.arguments,
-                        tool_call_id=call.id,
-                        revision_round=revision_round,
-                        review_feedback=review_feedback,
-                        trace_parent=span,
-                    )
+                    claim_map = self._cover_letter_claim_skill_validation_map or {}
+                    with self._claim_aware_required_skill_validation(claim_map):
+                        outcome = self.registry.execute(
+                            call.name,
+                            call.arguments,
+                            tool_call_id=call.id,
+                            revision_round=revision_round,
+                            review_feedback=review_feedback,
+                            trace_parent=span,
+                        )
             else:
                 outcome = self.registry.execute(
                     call.name,
