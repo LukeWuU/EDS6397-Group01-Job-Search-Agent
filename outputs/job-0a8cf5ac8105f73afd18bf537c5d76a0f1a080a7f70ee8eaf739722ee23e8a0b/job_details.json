@@ -1,0 +1,41 @@
+{
+  "job_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
+  "title": "AI Engineer | Camden Corporate Office (Remote Position)",
+  "company": "Camden Property Trust",
+  "industry_domain": "Real Estate / Enterprise AI Innovation",
+  "location": "Houston, TX 77056 (Remote position)",
+  "required_skills": [
+    "Python",
+    "REST APIs",
+    "vector databases",
+    "prompt engineering",
+    "RAG",
+    "Azure OpenAI",
+    "Anthropic",
+    "AWS Bedrock",
+    "agent frameworks",
+    "MLOps",
+    "LLMOps",
+    "Microsoft Copilot Studio",
+    "evaluation",
+    "responsible AI"
+  ],
+  "experience_requirement": "3+ years in software engineering or applied ML and 1+ year with generative AI or LLM applications",
+  "job_description": "1. Prototype AI solutions in Camden's corporate AI innovation environment.\n2. Translate real-estate and business needs into testable AI use cases.\n3. Build LLM applications using prompting, retrieval, and vector databases.\n4. Integrate commercial model providers and cloud AI services.\n5. Experiment with agent frameworks and low-code tools such as Copilot Studio.\n6. Design evaluations for quality, safety, usefulness, latency, and cost.\n7. Document prototypes and hand successful solutions to production teams.\n8. Apply responsible-AI, privacy, security, and data-governance principles.\n9. Collaborate with operations, product, data, and engineering stakeholders.\n10. Use Python, REST APIs, and modern MLOps or LLMOps practices.\n11. Bring at least three years of software engineering or applied ML experience.\n12. Demonstrate at least one year of practical generative AI development.",
+  "company_details": "Camden Property Trust is a publicly traded real-estate investment trust that develops, owns, and manages multifamily residential communities.\nIts corporate technology organization explores AI tools that can improve resident services, property operations, employee productivity, and decision-making.",
+  "url": "https://www.indeed.com/viewjob?jk=ec63ca62ba79a81c",
+  "deterministic_score": {
+    "rank": 2,
+    "final_score": 72.0,
+    "breakdown": {
+      "skills_score": 50.0,
+      "skills_weighted": 25.0,
+      "experience_score": 100.0,
+      "experience_weighted": 25.0,
+      "industry_domain_score": 80.0,
+      "industry_domain_weighted": 12.0,
+      "location_score": 100.0,
+      "location_weighted": 10.0
+    }
+  }
+}

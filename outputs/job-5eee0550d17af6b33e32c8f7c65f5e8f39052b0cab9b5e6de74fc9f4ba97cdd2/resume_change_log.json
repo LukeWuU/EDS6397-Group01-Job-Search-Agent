@@ -1,0 +1,112 @@
+{
+  "job_id": "5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2",
+  "title": "AI Engineer",
+  "company": "Chickasaw Nation Industries",
+  "revision_round": 0,
+  "review_feedback": null,
+  "edit_categories": [
+    "professional_summary",
+    "experience_bullet"
+  ],
+  "changes": [
+    {
+      "category": "professional_summary",
+      "target_id": "summary",
+      "before": "Machine learning engineer with three years of experience building evaluated\nML models, retrieval-augmented APIs, and monitored AWS deployments. M.S. in\nApplied Data Science with strengths across Python, PyTorch, and MLOps.",
+      "after": "AI engineer with expertise in Python, REST APIs, and prompt engineering. Developed risk models and retrieval-augmented knowledge APIs to improve recall and reduce analyst lookup time.",
+      "reason": "Aligns with the required role phrase and highlights relevant skills and achievements.",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2",
+          "source_field": "required_skills_raw",
+          "evidence_id": null,
+          "supported_claim": ""
+        },
+        {
+          "source_type": "candidate_profile",
+          "source_id": "cand-mira-solenne-001",
+          "source_field": "experience",
+          "evidence_id": null,
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "category": "experience_bullet",
+      "target_id": "exp-primary-bullet-1",
+      "before": "Built Python and scikit-learn risk models over SQL pipelines,\n      raising validated recall by 14\\% at a constant false-positive rate.",
+      "after": "Built Python and scikit-learn risk models over SQL data pipelines, raising validated recall by 14% while holding the false-positive rate constant.",
+      "reason": "Demonstrates Python and scikit-learn skills with a measurable outcome.",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-1",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-001",
+          "supported_claim": ""
+        },
+        {
+          "source_type": "job_posting",
+          "source_id": "5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2",
+          "source_field": "required_skills_raw",
+          "evidence_id": null,
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "category": "experience_bullet",
+      "target_id": "exp-primary-bullet-2",
+      "before": "Delivered a RAG knowledge API with FastAPI, embeddings, and\n      vector search, reducing median analyst lookup time by 36\\% in a pilot.",
+      "after": "Delivered a retrieval-augmented knowledge API with FastAPI, embeddings, and vector search, reducing median analyst lookup time by 36% in a controlled pilot.",
+      "reason": "Highlights vector databases and measurable impact on analyst efficiency.",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-2",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-002",
+          "supported_claim": ""
+        },
+        {
+          "source_type": "job_posting",
+          "source_id": "5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2",
+          "source_field": "required_skills_raw",
+          "evidence_id": null,
+          "supported_claim": ""
+        }
+      ]
+    }
+  ],
+  "change_count": 3,
+  "summary_change_count": 1,
+  "experience_bullet_change_count": 2,
+  "skill_change_count": 0,
+  "project_swap_change_count": 0,
+  "base_resume_pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\.runtime\\drafts\\job-5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2\\resume_before.pdf",
+  "draft_tex_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\.runtime\\drafts\\job-5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2\\resume_draft_r0.tex",
+  "draft_pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\.runtime\\drafts\\job-5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2\\resume_draft_r0.pdf",
+  "change_log_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\.runtime\\drafts\\job-5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2\\change_log_r0.json",
+  "compilation": {
+    "command": [
+      "pdflatex",
+      "-interaction=nonstopmode",
+      "-halt-on-error",
+      "resume_draft_r0.tex"
+    ],
+    "return_code": 0,
+    "pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\.runtime\\drafts\\job-5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2\\resume_draft_r0.pdf",
+    "page_count": 1,
+    "stdout_tail": "ers\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\hyperref.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/iftex\\iftex.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/graphics\\keyval.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/kvsetkeys\\kvsetkeys.sty\n)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/kvdefinekeys\\kvdefine\nkeys.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/pdfescape\\pdfescape.s\nty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/ltxcmds\\ltxcmds.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/pdftexcmds\\pdftexcmds\n.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/infwarerr\\infwarerr.s\nty)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hycolor\\hycolor.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\nameref.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/refcount\\refcount.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/gettitlestring\\gettit\nlestring.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/kvoptions\\kvoptions.sty\n)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/etoolbox\\etoolbox.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/stringenc\\stringenc.s\nty) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\pd1enc.def\n) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/intcalc\\intcalc.sty\n) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\puenc.def)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/url\\url.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/bitset\\bitset.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/bigintcalc\\bigintcalc\n.sty)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\hpdftex.def\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/rerunfilecheck\\rerunfil\necheck.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/uniquecounter\\uniquec\nounter.sty)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel\\babel.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel\\txtbabel.def)\n*************************************\n* Local config file bblopts.cfg used\n*\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/arabi\\bblopts.cfg)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel/locale/en\\babel\n-english.tex)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/babel-english\\english.l\ndf)) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/tools\\tabularx.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/tools\\array.sty))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/l3backend\\l3backend-pdf\ntex.def)\nNo file resume_draft_r0.aux.\n\nLaTeX Font Warning: Font shape `OT1/cmr/bx/sc' undefined\n(Font)              using `OT1/cmr/bx/n' instead on input line 59.\n\n[1{C:/Users/17982/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]\n(resume_draft_r0.aux)\n\nLaTeX Font Warning: Some font shapes were not available, defaults substituted.\n\n\nPackage rerunfilecheck Warning: File `resume_draft_r0.out' has changed.\n(rerunfilecheck)                Rerun to get outlines right\n(rerunfilecheck)                or use package `bookmark'.\n\n ) <C:\\Users\\17982\\AppData\\Local\\MiKTeX\\fonts/pk/ljfour/jknappen/ec/dpi600\\tcrm\n1000.pk><C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfon\nts/cm/cmbx10.pfb><C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/type1/publ\nic/amsfonts/cm/cmbx12.pfb><C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/t\nype1/public/amsfonts/cm/cmcsc10.pfb><C:/Users/17982/AppData/Local/Programs/MiKT\neX/fonts/type1/public/amsfonts/cm/cmr10.pfb><C:/Users/17982/AppData/Local/Progr\nams/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy10.pfb><C:/Users/17982/AppData/Lo\ncal/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmti10.pfb>\nOutput written on resume_draft_r0.pdf (1 page, 101272 bytes).\nTranscript written on resume_draft_r0.log.\n",
+    "stderr_tail": "pdflatex: major issue: So far, you have not checked for MiKTeX updates.\n"
+  },
+  "page_count": 1,
+  "evidence_citation_count": 6,
+  "base_tex_sha256": "91aac1069fe3d62e6170bea396a99858fd0b06bee9a96314a5bcd621e2c20418",
+  "tailored_tex_sha256": "771efe44cdb013eeab4a377e1bc45dfc55466c987639088323a334b0f1e517b1",
+  "protected_regions_sha256_before": "c104f5871a7baa722e5e2c3c72b2352b3d76bb79bb8ca6c62f3e35f06ed348f9",
+  "protected_regions_sha256_after": "c104f5871a7baa722e5e2c3c72b2352b3d76bb79bb8ca6c62f3e35f06ed348f9",
+  "protected_regions_unchanged": true,
+  "deterministic_plan_digest": "af1241c429d84d43cff3c445ab896393ea13d51f50a622353434ae38dda748ca"
+}

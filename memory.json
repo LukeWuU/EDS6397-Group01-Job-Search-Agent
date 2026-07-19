@@ -1,5 +1,24 @@
 {
   "schema_version": "1.0",
   "candidate_id": "cand-mira-solenne-001",
-  "facts": []
+  "facts": [
+    {
+      "fact_id": "fact-86b20add0a686f814a85",
+      "fact_type": "candidate_fact",
+      "statement": "I regularly collaborated with product managers and engineers to translate requirements into deployable AI and machine learning features.",
+      "normalized_value": "Cross-functional collaboration with product and engineering teams",
+      "skill_tags": [],
+      "evidence_refs": [
+        "5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2"
+      ],
+      "provenance": {
+        "source": "candidate_review",
+        "review_round": 1,
+        "run_id": "human-review:r1:5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2",
+        "reviewer_role": "candidate"
+      },
+      "created_at": "2026-07-19T03:35:39.395983Z",
+      "applied_in_run": true
+    }
+  ]
 }

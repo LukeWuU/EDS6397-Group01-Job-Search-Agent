@@ -1,0 +1,21 @@
+Tell me why this job is a good fit for me.
+
+Relevant Experience
+✅ Primary experience bullet exp-primary-bullet-1 aligns with the posting through Python, ai, data, model, python, scikit-learn. [job_posting] [EV-EXP-BULLET-001] [EV-EXP-001]
+✅ Internship experience at Copper Finch Systems supports additional overlap with Git, NumPy, ai, data, model, pandas. [job_posting] [EV-EXP-002]
+
+Seniority
+✅ No reliable explicit minimum is stated; candidate experience of 3 years aligns with the deterministic scoring experience component (100.0). [cand-mira-solenne-001] [job_posting] [job_posting]
+
+Education
+✅ Candidate education M.S. in Applied Data Science satisfies explicit posting education keywords. [job_posting] [EV-EDU-001]
+
+Core Skills
+✅ Aligned: Python, REST APIs, prompt engineering, RAG, vector databases, pandas, NumPy, scikit-learn, Docker, Git, CI/CD
+❌ Missing but evidenced in your profile: None
+❌ Genuine gaps: JavaScript, OpenAI, AWS Bedrock, LangGraph, Agno, CrewAI, cloud, observability, guardrails
+
+Projects
+❌ Current resume project GridPulse Load Forecaster has the lowest internal fit score (12.0) for this posting. [job_posting] [EV-PROJ-006]
+✅ Current resume project ModelWatch Release Guard is the strongest project match (18.0) for this posting. [job_posting] [EV-PROJ-003]
+ℹ️ No valid project swap meets the threshold; the current base-resume projects are the best available evidence set for this role. [job_posting] [EV-PROJ-003]

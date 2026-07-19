@@ -1,0 +1,138 @@
+%-------------------------------------------------------------------------------
+% Sample Resume Template - EDS 6397 Group Assignment: Job Search Agent
+% This is a PLACEHOLDER template. Replace every placeholder with your candidate's
+% FICTIONAL persona content. Do not use a real person's identity or contacts.
+% Compile on Overleaf (pdflatex). Your agent edits THIS .tex source and
+% recompiles it to produce the updated PDF. Keep the section markers intact;
+% they make programmatic edits reliable.
+% The resume holds only 2-3 projects. Every project listed here must also
+% appear in your project portfolio file.
+% The compiled resume must always be exactly ONE page.
+%-------------------------------------------------------------------------------
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+
+\pagestyle{empty}
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-0.6in}
+\addtolength{\textheight}{1.2in}
+
+\titleformat{\section}{\large\bfseries\scshape\raggedright}{}{0em}{}[\titlerule]
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+
+\newcommand{\resumeItem}[1]{\item\small{#1}}
+\newcommand{\resumeEntry}[4]{
+  \item
+  \begin{tabular*}{\textwidth}[t]{l@{\extracolsep{\fill}}r}
+    \textbf{#1} & #2 \\
+    \textit{\small#3} & \textit{\small#4} \\
+  \end{tabular*}\vspace{-4pt}
+}
+\newcommand{\resumeItemListStart}{\begin{itemize}[leftmargin=0.2in, itemsep=1pt]}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{2pt}}
+\newcommand{\resumeEntryListStart}{\begin{itemize}[leftmargin=0.0in, label={}, itemsep=2pt]}
+\newcommand{\resumeEntryListEnd}{\end{itemize}}
+
+\begin{document}
+
+%----------HEADER----------
+\begin{center}
+    {\Huge \scshape Mira Solenne} \\ \vspace{2pt}
+    Houston, TX $|$ 713-555-0142 $|$
+    \href{mailto:mira.solenne@example.com}{mira.solenne@example.com} $|$
+    \href{https://github.com/mira-solenne-labs}{github.com/mira-solenne-labs}
+\end{center}
+
+%----------SUMMARY----------
+\section{Professional Summary}
+% AGENT-EDIT-TARGET: summary
+AI engineer with expertise in Python, vector databases, and prompt engineering. Proven ability to collaborate cross-functionally with product and engineering teams to deliver scalable AI solutions.
+
+%----------EDUCATION----------
+\section{Education}
+\resumeEntryListStart
+  \resumeEntry{Gulf Prairie Institute of Technology}{Houston, TX}
+    {M.S. in Applied Data Science, GPA 3.82/4.00}{December 2023}
+  \resumeEntry{Redwood Plains University}{San Marcos, TX}
+    {B.S. in Computer Science}{May 2021}
+\resumeEntryListEnd
+
+%----------EXPERIENCE----------
+\section{Experience}
+\resumeEntryListStart
+
+  \resumeEntry{Machine Learning Engineer}{August 2023 -- Present}
+    {Northstar Lantern Analytics}{Houston, TX}
+  \resumeItemListStart
+    % AGENT-EDIT-TARGET: experience-bullet-1
+    \resumeItem{Built Python and scikit-learn risk models over SQL data pipelines, raising validated recall by 14\% while holding the false-positive rate constant.}
+    % AGENT-EDIT-TARGET: experience-bullet-2
+    \resumeItem{Delivered a retrieval-augmented knowledge API with FastAPI, embeddings, and vector search, reducing median analyst lookup time by 36\% in a controlled pilot.}
+    \resumeItem{Containerized models on AWS with MLflow, pytest, and drift
+      alerts, cutting failed monthly releases from five to two in six months.}
+  \resumeItemListEnd
+
+  \resumeEntry{Data Science Intern}{June 2022 -- August 2022}
+    {Copper Finch Systems}{Austin, TX}
+  \resumeItemListStart
+    \resumeItem{Prepared pandas and NumPy sensor features and trained a PyTorch
+      anomaly model that improved F1 by 9\% over the baseline.}
+    \resumeItem{Created SQL quality checks and Git-based test fixtures, reducing
+      recurring validation defects by 28\% across four reporting runs.}
+  \resumeItemListEnd
+
+\resumeEntryListEnd
+
+%----------PROJECTS----------
+% The agent may SWAP any project below with a more relevant one from the
+% portfolio file. Swapped-in projects must be formatted exactly like these.
+\section{Projects}
+\resumeEntryListStart
+
+  % AGENT-SWAP-TARGET: project-1
+  \resumeEntry{CarePath Evidence Navigator}{2025}
+    {Python, FastAPI, PostgreSQL, Embeddings, Vector Search, Docker}{Healthcare}
+  \resumeItemListStart
+    \resumeItem{Retrieved a reviewer-approved supporting passage in the top three results for 87\% of 120 synthetic evaluation questions.}
+  \resumeItemListEnd
+
+% AGENT-SWAP-TARGET: project-2
+  \resumeEntry{ShelfSense Demand Forecaster}{2024}
+    {Python, SQL, scikit-learn, pandas, MLflow}{Retail and Supply Chain}
+  \resumeItemListStart
+    \resumeItem{Created a weekly forecasting pipeline that reduced holdout
+      MAPE from 24.8\% to 18.6\% on synthetic store and product histories.}
+  \resumeItemListEnd
+
+  % AGENT-SWAP-TARGET: project-3
+  \resumeEntry{ModelWatch Release Guard}{2025}
+    {Python, Bash, AWS, Docker, MLflow, pytest, CI/CD}{MLOps}
+  \resumeItemListStart
+    \resumeItem{Detected all eight seeded regressions and reduced repeatable
+      manual release checks from 42 to 15 minutes.}
+  \resumeItemListEnd
+
+\resumeEntryListEnd
+
+%----------SKILLS----------
+\section{Skills}
+% AGENT-EDIT-TARGET: skills
+\begin{itemize}[leftmargin=0.2in, itemsep=1pt]
+  \small\item{\textbf{Languages:} Python, SQL, Bash}
+  \small\item{\textbf{ML, Data \& GenAI:} scikit-learn, PyTorch, pandas, NumPy, NLP, Transformers, Time Series Forecasting, Computer Vision, Model Evaluation, Retrieval-Augmented Generation, Embeddings, Vector Search, Prompt Engineering}
+  \small\item{\textbf{Cloud, MLOps \& Systems:} AWS, MLOps, Docker, MLflow, Model Monitoring, CI/CD, FastAPI, REST APIs, Git, pytest, PostgreSQL}
+\end{itemize}
+
+\end{document}

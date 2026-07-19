@@ -1,0 +1,21 @@
+Tell me why this job is a good fit for me.
+
+Relevant Experience
+✅ Primary experience bullet exp-primary-bullet-1 aligns with the posting through Python, ai, data, data pipelines, model, python. [job_posting] [EV-EXP-BULLET-001] [EV-EXP-001]
+✅ Internship experience at Copper Finch Systems supports additional overlap with ai, data, model. [job_posting] [EV-EXP-002]
+
+Seniority
+✅ Candidate has 3 years of experience, meeting the posting minimum of 2 years (exact). [cand-mira-solenne-001] [job_posting]
+
+Education
+✅ Candidate education M.S. in Applied Data Science satisfies explicit posting education keywords. [job_posting] [EV-EDU-001]
+
+Core Skills
+✅ Aligned: Python, RAG, embeddings, vector search, vector databases, evaluation, NLP
+❌ Missing but evidenced in your profile: None
+❌ Genuine gaps: production ML, LLMs, prompt design, chunking, AWS GovCloud, speech recognition, data pipelines
+
+Projects
+❌ Current resume project GridPulse Load Forecaster has the lowest internal fit score (4.29) for this posting. [job_posting] [EV-PROJ-006]
+✅ Current resume project ModelWatch Release Guard is the strongest project match (10.29) for this posting. [job_posting] [EV-PROJ-003]
+❌ Swap suggestion: replace GridPulse Load Forecaster with CarePath Evidence Navigator (+21.42 internal fit points). [job_posting] [EV-PROJ-006] [EV-PROJ-001]
