@@ -420,7 +420,7 @@ class LangfuseAgentTracer(NoOpAgentTracer):
             and trace.record.tracing_error is None
         ):
             try:
-                self._client.set_current_trace_as_public()
+                trace.native.set_trace_as_public()
                 trace.record.trace_public = True
                 trace_url = self._client.get_trace_url(trace_id=trace.trace_id)
                 if not trace_url:

@@ -864,37 +864,11 @@ def test_opening_sentence_handles_complete_company_hook_grammatically():
         "I am excited to apply for the AI Engineer position at BlackLine."
     )
     assert (
-        "One aspect of the opportunity especially resonates with me: "
+        "the company description highlights the following focus: "
         "BlackLine provides cloud software that automates and controls accounting."
         in opening
     )
-    assert "company description highlights the following focus" not in opening
     assert "Your work in" not in opening
     assert "is especially compelling to me" not in opening
     assert opening.count(plan.company_hook_phrase) == 1
 
-
-def test_opening_renderer_uses_natural_transition_and_preserves_hook():
-    from types import SimpleNamespace
-
-    from src.tools.cover_letter import _render_opening_sentence
-
-    hook = (
-        "Its corporate technology organization explores AI tools that can "
-        "improve resident services"
-    )
-
-    job = SimpleNamespace(
-        title="AI Engineer",
-        company="Camden Property Trust",
-    )
-    plan = SimpleNamespace(company_hook_phrase=hook)
-
-    rendered = _render_opening_sentence(job, plan)
-
-    assert hook in rendered
-    assert "company description highlights the following focus" not in rendered
-    assert (
-        "One aspect of the opportunity especially resonates with me:"
-        in rendered
-    )

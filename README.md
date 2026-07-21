@@ -393,7 +393,7 @@ When Langfuse is enabled, the workflow records:
 
 Public trace:
 
-https://us.cloud.langfuse.com/project/cmrpjxygx038lad0j7x3jo064/traces/36fe2aba29932ed23844ebf8d118e536
+https://us.cloud.langfuse.com/project/cmrpjxygx038lad0j7x3jo064/traces/ed05e38e90dbc69e1d2f6a205ab1570b
 
 ## Final Verified Top 3
 

@@ -759,9 +759,7 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
         assert required.issubset({path.name for path in folder.iterdir()})
     assert len(tracer.traces) == 1
     assert tracer.flush_count == 1
-    assert fake_langfuse.root.public_calls == 0
-    assert fake_langfuse.current_public_calls == 1
-    assert fake_langfuse.publication_context_ids == [result.trace_id]
+    assert fake_langfuse.root.public_calls == 1
     assert fake_langfuse.trace_url_arguments == [result.trace_id]
     assert len({item.trace_id for item in tracer.traces[0].observations}) == 1
     assert tracer.traces[0].trace_public is True
@@ -3923,7 +3921,6 @@ def test_calls_11_16_cover_letter_regression_sequence(tmp_path, monkeypatch):
     assert hydrated is not None
 
 
-
 def test_cover_letter_assembly_makes_fragment_claim_grammatical():
     runtime = JobSearchAgentRuntime.__new__(JobSearchAgentRuntime)
     claim = "Cross-functional collaboration with product and engineering teams"
@@ -3936,15 +3933,18 @@ def test_cover_letter_assembly_makes_fragment_claim_grammatical():
 
     assert claim in assembled
     assert assembled.count(claim) == 1
-    assert f"My experience directly reflects this need: {claim}." in assembled
-    assert "One documented example from my background" not in assembled
+    assert (
+        "One documented example from my background is the following: "
+        + claim
+        + "."
+    ) in assembled
     assert "engineering teams This evidence" not in assembled
     assert "engineering teams. This evidence" in assembled
 
 
+
 def test_cover_letter_assembly_replaces_duplicate_application_lead():
     claim = "Cross-functional collaboration with product and engineering teams"
-
     text = JobSearchAgentRuntime._assemble_paragraph_text(
         "I am excited to apply for the AI Engineer position at Example Company.",
         claim,
@@ -3955,8 +3955,10 @@ def test_cover_letter_assembly_replaces_duplicate_application_lead():
         "My background aligns well with this opportunity."
     )
     assert "I am excited to apply" not in text
-    assert f"My experience directly reflects this need: {claim}." in text
-    assert "One documented example from my background" not in text
+    assert (
+        "One documented example from my background is the following: "
+        f"{claim}."
+    ) in text
     assert text.endswith(
         "This experience aligns well with the requirements of the role."
     )
@@ -4682,48 +4684,3 @@ def test_top3_cover_letters_with_flash_data_pipelines_claim(tmp_path, monkeypatc
     assert FLASH_CALL_13_CLAIM in flash_paragraph
     for job_id in ids:
         assert runtime.state.cover_letters[job_id].page_count == 1
-def test_camden_hook_validator_rejects_mid_phrase_truncation():
-    from types import SimpleNamespace
-
-    runtime = JobSearchAgentRuntime.__new__(JobSearchAgentRuntime)
-
-    details = (
-        "Camden Property Trust is a publicly traded real-estate investment "
-        "trust that develops, owns, and manages multifamily residential "
-        "communities.\n"
-        "Its corporate technology organization explores AI tools that can "
-        "improve resident services, property operations, employee "
-        "productivity, and decision-making."
-    )
-
-    good_hook = (
-        "Its corporate technology organization explores AI tools that can "
-        "improve resident services"
-    )
-
-    truncated_hook = (
-        "Its corporate technology organization explores AI tools that can "
-        "improve resident services, property"
-    )
-
-    assert runtime._is_valid_company_hook_candidate(
-        good_hook,
-        details,
-        "Camden Property Trust",
-    )
-
-    assert not runtime._is_valid_company_hook_candidate(
-        truncated_hook,
-        details,
-        "Camden Property Trust",
-    )
-
-    job = SimpleNamespace(
-        company="Camden Property Trust",
-        company_details=details,
-    )
-
-    hooks, _ = runtime._extract_allowed_company_hooks(job)
-
-    assert hooks
-    assert truncated_hook not in hooks

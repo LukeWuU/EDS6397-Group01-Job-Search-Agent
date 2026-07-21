@@ -247,15 +247,6 @@ COVER_LETTER_NORMAL_CONSTRAINTS = [
     "Do not claim skills listed in target_context.do_not_claim_skills.",
     "Do not add the company name unless it is already in the selected hook option.",
     "Do not add introductory text to company_hook_phrase.",
-    (
-        "Choose a company hook that ends at a natural sentence or clause "
-        "boundary and reads as a complete thought."
-    ),
-    (
-        "Write lead_in and follow_up as natural professional prose; avoid "
-        "phrases such as documented example, evidence demonstrates, or "
-        "the following."
-    ),
     "Use approved memory facts from target_context.current_memory_facts when relevant.",
     "Python injects citations, evidence IDs, source fields, letter_date, and nested plan.",
     "Never author citation objects, source IDs, source fields, or evidence IDs.",

@@ -989,8 +989,9 @@ def _render_opening_sentence(job, plan) -> str:
     hook = plan.company_hook_phrase.strip().rstrip(".!?")
     return (
         f"I am excited to apply for the {latex_escape(job.title)} position at "
-        f"{latex_escape(job.company)}. One aspect of the opportunity especially "
-        f"resonates with me: {latex_escape(hook)}."
+        f"{latex_escape(job.company)}. I am especially interested in this "
+        "opportunity because the company description highlights the following "
+        f"focus: {latex_escape(hook)}."
     )
 
 
