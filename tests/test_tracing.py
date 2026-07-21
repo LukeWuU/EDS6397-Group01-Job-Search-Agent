@@ -105,6 +105,8 @@ class FakeLangfuse:
         self.publication_fails = publication_fails
         self.url_fails = url_fails
         self.trace_url_arguments = []
+        self.current_public_calls = 0
+        self.publication_context_ids = []
 
     @property
     def root(self):
@@ -122,6 +124,12 @@ class FakeLangfuse:
     def get_current_trace_id(self):
         return self.current_trace_id
 
+    def set_current_trace_as_public(self):
+        self.current_public_calls += 1
+        self.publication_context_ids.append(self.current_trace_id)
+        if self.publication_fails:
+            raise RuntimeError("publication failed")
+
     def get_trace_url(self, *, trace_id):
         self.trace_url_arguments.append(trace_id)
         if self.url_fails:
@@ -132,6 +140,7 @@ class FakeLangfuse:
         self.flushes += 1
 
 
+
 def test_langfuse_private_lifecycle_uses_one_root_without_public_url():
     fake = FakeLangfuse()
     tracer = LangfuseAgentTracer(
@@ -139,15 +148,24 @@ def test_langfuse_private_lifecycle_uses_one_root_without_public_url():
         client=fake,
     )
     trace = tracer.start_trace("agent_run", run_id="r1")
-    with tracer.span(trace, "chat_model", observation_type="generation") as span:
+
+    with tracer.span(
+        trace,
+        "chat_model",
+        observation_type="generation",
+    ) as span:
         span.set_output({"content": "ok"})
+
     tracer.end_trace(trace, output={"completed": True})
     tracer.flush()
+
     assert trace.trace_id == "0123456789abcdef0123456789abcdef"
     assert len(fake.roots) == 1
     assert fake.root.ended == 1
     assert len(fake.root.children) == 1
     assert fake.root.public_calls == 0
+    assert fake.current_public_calls == 0
+    assert fake.publication_context_ids == []
     assert fake.trace_url_arguments == []
     assert trace.trace_public is False
     assert trace.trace_url is None
@@ -163,16 +181,25 @@ def test_successful_public_trace_uses_sdk_id_url_and_one_flush():
         client=fake,
     )
     trace = tracer.start_trace("agent_run", run_id="public-run")
+
     with tracer.span(trace, "human_review_pause") as review:
         with tracer.span(review, "revision_call") as revision:
             revision.set_output({"ok": True})
+
     tracer.end_trace(trace, output={"completed": True})
     tracer.flush()
 
     assert len(fake.roots) == 1
     assert len(trace.record.observations) == 2
-    assert {item.trace_id for item in trace.record.observations} == {trace.trace_id}
-    assert fake.root.public_calls == 1
+    assert {
+        item.trace_id for item in trace.record.observations
+    } == {trace.trace_id}
+
+    # The client-level active-trace API is required for publication.
+    assert fake.root.public_calls == 0
+    assert fake.current_public_calls == 1
+    assert fake.publication_context_ids == [trace.trace_id]
+
     assert fake.trace_url_arguments == [trace.trace_id]
     assert trace.trace_url == f"https://trace.local/{trace.trace_id}"
     assert trace.trace_public is True
@@ -188,6 +215,7 @@ def test_failed_trace_is_closed_flushed_and_never_public():
         client=fake,
     )
     trace = tracer.start_trace("agent_run", run_id="failed-run")
+
     tracer.end_trace(
         trace,
         output={"completed": False},
@@ -197,6 +225,8 @@ def test_failed_trace_is_closed_flushed_and_never_public():
 
     assert fake.root.ended == 1
     assert fake.root.public_calls == 0
+    assert fake.current_public_calls == 0
+    assert fake.publication_context_ids == []
     assert fake.trace_url_arguments == []
     assert trace.trace_public is False
     assert trace.trace_url is None
@@ -209,14 +239,23 @@ def test_publication_failure_records_warning_without_fabricated_url():
         AppConfig(langfuse_enabled=True, langfuse_public_trace=True),
         client=fake,
     )
-    trace = tracer.start_trace("agent_run", run_id="publication-failure")
+    trace = tracer.start_trace(
+        "agent_run",
+        run_id="publication-failure",
+    )
+
     tracer.end_trace(trace, output={"completed": True})
     tracer.flush()
 
-    assert fake.root.public_calls == 1
+    assert fake.root.public_calls == 0
+    assert fake.current_public_calls == 1
+    assert fake.publication_context_ids == [trace.trace_id]
     assert fake.trace_url_arguments == []
     assert trace.trace_public is False
     assert trace.trace_url is None
-    assert trace.publication_error == "Public trace publication failed: RuntimeError"
+    assert (
+        trace.publication_error
+        == "Public trace publication failed: RuntimeError"
+    )
     assert fake.root.ended == 1
     assert fake.flushes == 1

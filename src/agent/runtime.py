@@ -2601,6 +2601,28 @@ class JobSearchAgentRuntime:
         normalized = _normalize_phrase(candidate)
         if normalized not in _normalize_phrase(company_details):
             return False
+
+        # A hook must end at a natural textual boundary. This prevents
+        # arbitrary word-window candidates such as "...services, property"
+        # when the source continues with "operations".
+        start = company_details.find(candidate)
+        end = start + len(candidate)
+        remainder = company_details[end:]
+
+        if remainder:
+            immediate = remainder[0]
+            boundary_characters = ".,!?;:\n\r\u2014\u2013"
+
+            if immediate not in boundary_characters:
+                stripped_remainder = remainder.lstrip()
+
+                if (
+                    stripped_remainder
+                    and stripped_remainder[0]
+                    not in boundary_characters
+                ):
+                    return False
+
         words = _COVER_WORD_PATTERN.findall(candidate)
         if not 4 <= len(words) <= 15:
             return False
@@ -3086,7 +3108,7 @@ class JobSearchAgentRuntime:
             claim_sentence = exact_claim
         else:
             claim_sentence = (
-                "One documented example from my background is the following: "
+                "My experience directly reflects this need: "
                 f"{exact_claim}."
             )
 
