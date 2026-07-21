@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -137,7 +138,7 @@ class ScoreWeights(BaseModel):
 class SkillSourceReference(BaseModel):
     """Evidence source supporting a candidate skill match."""
 
-    source_type: Literal["master_skill", "project", "evidence", "memory"]
+    source_type: Literal["master_skill", "project", "evidence", "memory", "resume_tex"]
     source_id: str
     display_skill: str
 
@@ -194,6 +195,12 @@ class ScoringResult(BaseModel):
     formula_description: str
     candidate_skill_count: int
     memory_fact_count: int
+    memory_skill_fact_count: int
+    memory_candidate_fact_count: int
+    memory_skill_fact_ids: list[str]
+    memory_candidate_fact_ids: list[str]
+    memory_scoring_policy: str
+    resume_skill_count: int
     warning: str | None = None
 
 
@@ -277,9 +284,52 @@ def _add_skill_source(
         existing.append(source)
 
 
-def _profile_has_vector_search(bundle: CandidateBundle) -> bool:
-    """Return True when profile evidence includes vector search."""
+def _extract_resume_skill_values(
+    resume_tex_path: Path | None,
+) -> list[str]:
+    """Extract deterministic skill phrases from the template Skills section."""
+    if resume_tex_path is None:
+        return []
+    if not resume_tex_path.is_file():
+        raise ValueError(f"Resume LaTeX not found: {resume_tex_path}")
+
+    content = resume_tex_path.read_text(encoding="utf-8")
+    section = re.search(
+        r"\\section\{Skills\}(.*?)(?=\\section\{|\\end\{document\})",
+        content,
+        flags=re.DOTALL,
+    )
+    if section is None:
+        return []
+
+    skills: list[str] = []
+    for line in section.group(1).splitlines():
+        match = re.search(
+            r"\\textbf\{[^}]*:\}\s*(.*?)\}\s*$",
+            line.strip(),
+        )
+        if match is None:
+            continue
+        values = (
+            match.group(1)
+            .replace(r"\&", "&")
+            .replace(r"\_", "_")
+        )
+        skills.extend(
+            item.strip()
+            for item in values.split(",")
+            if item.strip()
+        )
+    return skills
+
+
+def _profile_has_vector_search(
+    bundle: CandidateBundle,
+    resume_tex_path: Path | None = None,
+) -> bool:
+    """Return True when whole-profile evidence includes vector search."""
     terms: list[str] = list(bundle.all_master_skills())
+    terms.extend(_extract_resume_skill_values(resume_tex_path))
     for project in bundle.all_projects():
         terms.extend(project.technology_stack)
         terms.extend(project.skills_demonstrated)
@@ -291,11 +341,28 @@ def _profile_has_vector_search(bundle: CandidateBundle) -> bool:
 def build_candidate_skill_universe(
     bundle: CandidateBundle,
     memory: CandidateMemory,
+    resume_tex_path: Path | None = None,
 ) -> CandidateSkillUniverse:
     """Build the whole-profile candidate skill universe with source references."""
     universe: dict[str, list[SkillSourceReference]] = {}
     display_by_canonical: dict[str, str] = {}
-    has_vector_search = _profile_has_vector_search(bundle)
+    has_vector_search = _profile_has_vector_search(
+        bundle,
+        resume_tex_path,
+    )
+
+    for skill in _extract_resume_skill_values(resume_tex_path):
+        _add_skill_source(
+            universe,
+            display_by_canonical,
+            skill,
+            SkillSourceReference(
+                source_type="resume_tex",
+                source_id=resume_tex_path.name,
+                display_skill=skill,
+            ),
+            has_vector_search=has_vector_search,
+        )
 
     for category_name, skills in (
         ("languages", bundle.profile.master_skills.languages),
@@ -765,12 +832,17 @@ def scoring_tool(
     jobs: Sequence[Job],
     bundle: CandidateBundle,
     memory: CandidateMemory,
+    resume_tex_path: Path | None = None,
 ) -> ScoringResult:
     """Score jobs using deterministic Python logic over the whole candidate profile."""
     if not jobs:
         raise ValueError("scoring_tool requires at least one job")
 
-    skill_universe = build_candidate_skill_universe(bundle, memory)
+    skill_universe = build_candidate_skill_universe(
+        bundle,
+        memory,
+        resume_tex_path,
+    )
     has_vector_search = "vector search" in skill_universe.canonical_skills
     candidate_domains = build_candidate_domain_universe(bundle)
     weights = ScoreWeights()
@@ -794,6 +866,17 @@ def scoring_tool(
             f"Only {len(ranked_jobs)} job(s) were provided; top_3 contains all scored jobs."
         )
 
+    memory_skill_fact_ids = sorted(
+        fact.fact_id
+        for fact in memory.facts
+        if fact.fact_type == "skill"
+    )
+    memory_candidate_fact_ids = sorted(
+        fact.fact_id
+        for fact in memory.facts
+        if fact.fact_type == "candidate_fact"
+    )
+
     return ScoringResult(
         total_scored=len(ranked_jobs),
         ranked_jobs=ranked_jobs,
@@ -802,6 +885,21 @@ def scoring_tool(
         formula_description=FORMULA_DESCRIPTION,
         candidate_skill_count=len(skill_universe.canonical_skills),
         memory_fact_count=len(memory.facts),
+        memory_skill_fact_count=len(memory_skill_fact_ids),
+        memory_candidate_fact_count=len(memory_candidate_fact_ids),
+        memory_skill_fact_ids=memory_skill_fact_ids,
+        memory_candidate_fact_ids=memory_candidate_fact_ids,
+        memory_scoring_policy=(
+            "Memory facts with fact_type='skill' contribute to deterministic "
+            "skill matching. candidate_fact entries are considered and reported "
+            "for auditability but do not directly change the skills, experience, "
+            "industry-domain, or location dimensions."
+        ),
+        resume_skill_count=sum(
+            1
+            for sources in skill_universe.canonical_to_sources.values()
+            if any(source.source_type == "resume_tex" for source in sources)
+        ),
         warning=warning,
     )
 

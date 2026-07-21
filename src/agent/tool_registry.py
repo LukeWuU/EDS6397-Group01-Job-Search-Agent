@@ -321,6 +321,7 @@ class AssignmentToolRegistry:
                 self.state.filtering_result.accepted_jobs,
                 self.bundle,
                 self.memory,
+                self.base_resume_tex_path,
             )
             if len(result.top_3) != 3:
                 raise ToolExecutionError(

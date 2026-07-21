@@ -415,3 +415,38 @@ def test_title_normalization_helpers() -> None:
     assert "machine learning" in normalize_title("ML Engineer")
     assert "generative ai" in normalize_title("GenAI Engineer")
     assert normalize_title("Gen AI Engineer") == normalize_title("Generative AI Engineer")
+
+
+def test_actual_dataset_multi_clause_experience_requirements(
+    repository_jobs: list[Job],
+    repository_profile: CandidateProfile,
+) -> None:
+    """Multi-clause AND requirements use the highest explicit minimum."""
+    jobs_by_company = {job.company: job for job in repository_jobs}
+    result = filtering_tool(repository_jobs, repository_profile)
+    decisions_by_company = {
+        decision.company: decision for decision in result.decisions
+    }
+
+    for company in ("Intel", "Chickasaw Nation Industries"):
+        job = jobs_by_company[company]
+        decision = decisions_by_company[company]
+
+        assert job.experience_parse_status == "exact"
+        assert job.minimum_years == 5
+        assert decision.accepted is False
+        assert any(
+            reason.code == FilterReasonCode.EXPERIENCE_MISMATCH
+            for reason in decision.rejection_reasons
+        )
+
+    camden_job = jobs_by_company["Camden Property Trust"]
+    camden_decision = decisions_by_company["Camden Property Trust"]
+
+    assert camden_job.experience_parse_status == "exact"
+    assert camden_job.minimum_years == 3
+    assert camden_decision.accepted is True
+    assert all(
+        reason.code != FilterReasonCode.EXPERIENCE_MISMATCH
+        for reason in camden_decision.rejection_reasons
+    )

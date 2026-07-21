@@ -34,7 +34,7 @@ _MULTI_REQUIREMENT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _ALTERNATIVE_PATTERN = re.compile(
-    r"\d+\+?\s*years?[^.;]{0,120}\bor\b[^.;]{0,120}\d+\+?\s*years?",
+    r"\d+\+?\s*years?[^.;]{0,120}\bor\s+\d+\+?\s*years?",
     re.IGNORECASE,
 )
 
@@ -106,8 +106,16 @@ def parse_experience_requirement(
     if not year_values:
         return "unspecified", None, []
 
-    if _ALTERNATIVE_PATTERN.search(text) or _MULTI_REQUIREMENT_PATTERN.search(text):
+    if _ALTERNATIVE_PATTERN.search(text):
         return "ambiguous", None, year_values
+
+    if len(year_values) > 1 and (
+        ";" in text or "depending on background" in lower
+    ):
+        return "ambiguous", None, year_values
+
+    if _MULTI_REQUIREMENT_PATTERN.search(text):
+        return "exact", max(year_values), year_values
 
     if len(year_values) > 1:
         return "ambiguous", None, year_values
