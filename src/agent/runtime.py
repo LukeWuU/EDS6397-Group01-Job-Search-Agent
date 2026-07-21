@@ -3071,17 +3071,33 @@ class JobSearchAgentRuntime:
 
     @staticmethod
     def _assemble_paragraph_text(lead_in: str, claim: str, follow_up: str) -> str:
+        """Assemble grammatical sentences while preserving the exact claim text."""
         lead = lead_in.strip()
+        exact_claim = claim.strip()
         follow = follow_up.strip()
-        if lead.endswith((".", "!", "?", ",", ";", ":")):
-            separator_before_claim = " "
+
+        if lead.casefold().startswith("i am excited to apply"):
+            lead = "My background aligns well with this opportunity"
+
+        if lead and not lead.endswith((".", "!", "?")):
+            lead = f"{lead}."
+
+        if exact_claim.endswith((".", "!", "?")):
+            claim_sentence = exact_claim
         else:
-            separator_before_claim = " "
-        if follow and claim.endswith((".", "!", "?", ",", ";", ":")):
-            separator_before_follow = " "
-        else:
-            separator_before_follow = " "
-        return f"{lead}{separator_before_claim}{claim}{separator_before_follow}{follow}".strip()
+            claim_sentence = (
+                "One documented example from my background is the following: "
+                f"{exact_claim}."
+            )
+
+        if follow and not follow.endswith((".", "!", "?")):
+            follow = f"{follow}."
+
+        return " ".join(
+            part
+            for part in (lead, claim_sentence, follow)
+            if part
+        )
 
     @staticmethod
     def _segment_restates_allowed_claim(segment: str, claim: str) -> bool:
@@ -4686,14 +4702,46 @@ class JobSearchAgentRuntime:
             return _TailorResumeTextDraftWithSwap
         return _TailorResumeTextDraftNoSwap
 
+    @staticmethod
+    def _normalize_tailor_text_edit_keys(
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Repair only punctuation variants of the required new_text key."""
+        normalized = copy.deepcopy(arguments)
+
+        for field in ("professional_summary", "bullet_1", "bullet_2"):
+            edit = normalized.get(field)
+            if not isinstance(edit, dict):
+                continue
+
+            aliases = [
+                key
+                for key in list(edit)
+                if key != "new_text"
+                and re.sub(r"[^a-z0-9]+", "", str(key).casefold()) == "newtext"
+            ]
+
+            for alias in aliases:
+                alias_value = edit[alias]
+                if "new_text" in edit and edit["new_text"] != alias_value:
+                    raise ToolArgumentsError(
+                        "Tailor resume transport rejection: conflicting "
+                        f"new_text aliases in {field}"
+                    )
+                edit.setdefault("new_text", alias_value)
+                del edit[alias]
+
+        return normalized
+
     def _parse_tailor_draft_arguments(
         self,
         arguments: dict[str, Any],
         contract: dict[str, Any],
     ) -> _TailorResumeTextDraftBase:
         draft_model = self._tailor_draft_model_for_contract(contract)
+        normalized_arguments = self._normalize_tailor_text_edit_keys(arguments)
         try:
-            return draft_model.model_validate(arguments)
+            return draft_model.model_validate(normalized_arguments)
         except ValidationError as exc:
             raise ToolArgumentsError(
                 f"Tailor resume draft schema rejection: {exc}"
@@ -4891,12 +4939,13 @@ class JobSearchAgentRuntime:
         target_job_id: str,
         *,
         has_project_swap: bool,
+        required_role_phrase: str,
     ) -> dict[str, Any]:
         return {
             "decision_summary": "<concise explanation>",
             "job_id": target_job_id,
             "professional_summary": {
-                "new_text": "<tailored summary>",
+                "new_text": f"{required_role_phrase} with <evidence-grounded qualifications>",
                 "reason": "<reason>",
             },
             "bullet_1": {"new_text": "<tailored bullet 1 text>", "reason": "<reason>"},
@@ -5050,6 +5099,22 @@ class JobSearchAgentRuntime:
                 "Tailor resume hydration rejection: expected exactly two editable bullets"
             )
         citation_contract = self._build_citation_contract(target_job_id)
+        summary_citations = copy.deepcopy(
+            citation_contract["summary_required_citations"]
+        )
+        for fact in self.registry.memory.facts:
+            if self._paragraph_uses_memory_fact(
+                draft.professional_summary.new_text,
+                fact,
+            ):
+                summary_citations.append(
+                    self._memory_fact_citation(
+                        fact,
+                        draft.professional_summary.new_text,
+                    )
+                )
+        summary_citations = self._dedupe_cover_citations(summary_citations)
+
         expected_swap = self.state.fit_analyses[
             target_job_id
         ].projects.swap_suggestion
@@ -5084,9 +5149,7 @@ class JobSearchAgentRuntime:
                 "professional_summary": {
                     "new_text": draft.professional_summary.new_text,
                     "reason": draft.professional_summary.reason,
-                    "citations": copy.deepcopy(
-                        citation_contract["summary_required_citations"]
-                    ),
+                    "citations": copy.deepcopy(summary_citations),
                 },
                 "experience_bullet_edits": [
                     {
@@ -5385,6 +5448,7 @@ class JobSearchAgentRuntime:
                 required_shape = self._tailor_draft_required_shape(
                     target_job_id,
                     has_project_swap=expected_swap is not None,
+                    required_role_phrase=self._derive_required_role_phrase(job.title),
                 )
             required_role_phrase = self._derive_required_role_phrase(job.title)
             project_swap_required = expected_swap is not None

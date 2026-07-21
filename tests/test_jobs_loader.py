@@ -122,3 +122,63 @@ def test_parse_experience_requirement_examples() -> None:
     assert status == "ambiguous"
     assert minimum is None
     assert values == [3, 2]
+
+
+def test_conjunctive_experience_requirements_use_highest_minimum() -> None:
+    """Simultaneous AND requirements use the highest explicit minimum."""
+    cases = [
+        (
+            "3+ years of non-internship software development and "
+            "2+ years of design or architecture experience",
+            3,
+            [3, 2],
+        ),
+        (
+            "5+ years of software development and "
+            "2+ years of ML engineering, data science, or research experience",
+            5,
+            [5, 2],
+        ),
+        (
+            "5+ years across the software development lifecycle and "
+            "1+ year with generative AI or LLM solutions",
+            5,
+            [5, 1],
+        ),
+        (
+            "3+ years in software engineering or applied ML and "
+            "1+ year with generative AI or LLM applications",
+            3,
+            [3, 1],
+        ),
+    ]
+
+    for raw, expected_minimum, expected_values in cases:
+        status, minimum, values = parse_experience_requirement(raw)
+
+        assert status == "exact"
+        assert minimum == expected_minimum
+        assert values == expected_values
+
+
+def test_complex_alternative_experience_requirements_remain_ambiguous() -> None:
+    """OR and background-dependent requirements must not invent one minimum."""
+    cases = [
+        (
+            "3+ years after a bachelor's degree, or "
+            "2+ years after a master's degree, in machine learning or a related field",
+            [3, 2],
+        ),
+        (
+            "3+ years building models for business applications; "
+            "PhD or master's degree plus 4+ years may be required depending on background",
+            [3, 4],
+        ),
+    ]
+
+    for raw, expected_values in cases:
+        status, minimum, values = parse_experience_requirement(raw)
+
+        assert status == "ambiguous"
+        assert minimum is None
+        assert values == expected_values

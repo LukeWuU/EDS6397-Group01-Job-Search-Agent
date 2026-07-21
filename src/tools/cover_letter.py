@@ -984,6 +984,17 @@ def _document_date(plan: CoverLetterPlan) -> date:
     return plan.letter_date or date.today()
 
 
+def _render_opening_sentence(job, plan) -> str:
+    """Render a grammatical opening while preserving the grounded hook phrase."""
+    hook = plan.company_hook_phrase.strip().rstrip(".!?")
+    return (
+        f"I am excited to apply for the {latex_escape(job.title)} position at "
+        f"{latex_escape(job.company)}. I am especially interested in this "
+        "opportunity because the company description highlights the following "
+        f"focus: {latex_escape(hook)}."
+    )
+
+
 def _render_contact_header(bundle: CandidateBundle) -> list[str]:
     persona = bundle.profile.persona
     contact_parts = [
@@ -1026,11 +1037,7 @@ def _render_latex(
         "",
         "Dear Hiring Manager,",
         "",
-        (
-            f"I am excited to apply for the {latex_escape(job.title)} position at "
-            f"{latex_escape(job.company)}. Your work in "
-            f"{latex_escape(plan.company_hook_phrase)} is especially compelling to me."
-        ),
+        _render_opening_sentence(job, plan),
         "",
     ]
     for paragraph in plan.body_paragraphs:

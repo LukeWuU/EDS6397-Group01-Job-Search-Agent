@@ -191,6 +191,7 @@ def _valid_skills(job) -> list[str]:
         "Chickasaw Nation Industries": ["Python", "REST APIs", "RAG", "Docker"],
         "Camden Property Trust": ["Python", "REST APIs", "RAG", "MLOps"],
         "Flash AI": ["Python", "RAG", "Embeddings", "NLP"],
+        "BlackLine": ["RAG", "AWS", "MLOps"],
     }
     return preferred[job.company]
 
@@ -841,3 +842,33 @@ def test_output_evidence_determinism_no_overwrite_and_no_input_mutation(
         value.model_dump()
         for value in (job, score, analysis, bundle, memory, finalized_one, plan)
     ]
+
+def test_opening_sentence_handles_complete_company_hook_grammatically():
+    from types import SimpleNamespace
+
+    from src.tools.cover_letter import _render_opening_sentence
+
+    job = SimpleNamespace(
+        title="AI Engineer",
+        company="BlackLine",
+    )
+    plan = SimpleNamespace(
+        company_hook_phrase=(
+            "BlackLine provides cloud software that automates and controls accounting"
+        )
+    )
+
+    opening = _render_opening_sentence(job, plan)
+
+    assert opening.startswith(
+        "I am excited to apply for the AI Engineer position at BlackLine."
+    )
+    assert (
+        "the company description highlights the following focus: "
+        "BlackLine provides cloud software that automates and controls accounting."
+        in opening
+    )
+    assert "Your work in" not in opening
+    assert "is especially compelling to me" not in opening
+    assert opening.count(plan.company_hook_phrase) == 1
+

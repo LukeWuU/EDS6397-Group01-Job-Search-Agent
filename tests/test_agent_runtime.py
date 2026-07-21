@@ -359,6 +359,7 @@ def _responses(
     cover_plans,
     *,
     malformed_tailoring=False,
+    primary_claims_by_job=None,
 ):
     ids = [item.job_id for item in scores]
     bundle, _, _, _ = _workflow_plans()
@@ -496,6 +497,7 @@ def _responses(
                             f"Generate the approved cover letter for {job_id}."
                         ),
                         allowed_hook=hooks_by_job[job_id][0],
+                        primary_claim=(primary_claims_by_job or {}).get(job_id),
                     ),
                     50 + index,
                 )
@@ -599,6 +601,7 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
             resume_plans,
             cover_plans,
             malformed_tailoring=True,
+            primary_claims_by_job=_primary_claims_by_job(tmp_path, scores),
         )
     )
     provider = ReviewProvider(scores[0].job_id)
@@ -670,7 +673,14 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     assert "constraints" not in first_recovery
     assert "exact_tailor_resume_structural_template" not in first_recovery
     first_checkpoint = json.loads(client.calls[6]["messages"][1]["content"])
-    assert first_checkpoint["target_context"]["project_swap_required"] is False
+    expected_project_swap_required = (
+        runtime.state.fit_analyses[scores[0].job_id].projects.swap_suggestion
+        is not None
+    )
+    assert (
+        first_checkpoint["target_context"]["project_swap_required"]
+        is expected_project_swap_required
+    )
     contracts = []
     for call in client.calls:
         contracts.append(_checkpoint_contract_from_messages(call["messages"]))
@@ -698,7 +708,10 @@ def test_full_actual_tool_run_recovers_and_uses_same_client(
     first_tailoring_context = tailoring_checkpoint["target_context"]
     assert first_tailoring_context["target_job_id"] == scores[0].job_id
     assert first_tailoring_context["rank"] == 1
-    assert first_tailoring_context["project_swap_required"] is False
+    assert (
+        first_tailoring_context["project_swap_required"]
+        is expected_project_swap_required
+    )
     assert "citation_contract" not in first_tailoring_context
     assert "bullet_1_source" in first_tailoring_context
     assert "36%" in json.dumps(first_tailoring_context["bullet_2_source"])
@@ -789,7 +802,13 @@ def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
     assert first_contract["target_job_id"] == ids[0]
     assert first_contract["target_rank"] == 1
     assert first_contract["initial_draft"] is True
-    assert first_contract["target_context"]["project_swap_required"] is False
+    expected_first_swap_required = (
+        runtime.state.fit_analyses[ids[0]].projects.swap_suggestion is not None
+    )
+    assert (
+        first_contract["target_context"]["project_swap_required"]
+        is expected_first_swap_required
+    )
     assert first_contract["required_argument_shape"]["job_id"] == ids[0]
     assert "edit_plan" not in first_contract["required_argument_shape"]
     assert "bullet_1" in first_contract["required_argument_shape"]
@@ -838,6 +857,39 @@ def test_deterministic_targets_and_target_bound_tailoring_contract(tmp_path):
     assert revision_contract["target_context"]["revision_feedback"] == (
         "Keep the revision concise."
     )
+
+
+def test_tailor_resume_repairs_punctuation_variant_of_new_text_key(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract, call = _valid_compact_tailor_call(runtime)
+
+    malformed = copy.deepcopy(call.arguments)
+    expected_text = malformed["bullet_2"].pop("new_text")
+    malformed["bullet_2"]["new, text"] = expected_text
+
+    raw_call = _tool("tailor_resume", malformed, 91)
+    hydrated = runtime._hydrate_tailor_resume_call(raw_call, contract)
+
+    second_edit = hydrated.arguments["edit_plan"]["experience_bullet_edits"][1]
+    assert second_edit["new_text"] == expected_text
+
+    # The adapter must not mutate the original model response.
+    assert "new, text" in raw_call.arguments["bullet_2"]
+    assert "new_text" not in raw_call.arguments["bullet_2"]
+
+
+def test_tailor_resume_rejects_conflicting_new_text_aliases(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    contract, call = _valid_compact_tailor_call(runtime)
+
+    malformed = copy.deepcopy(call.arguments)
+    malformed["bullet_2"]["new, text"] = "Conflicting replacement text."
+
+    with pytest.raises(ToolArgumentsError, match="conflicting new_text aliases"):
+        runtime._hydrate_tailor_resume_call(
+            _tool("tailor_resume", malformed, 92),
+            contract,
+        )
 
 
 def test_tailor_resume_draft_schema_and_hydration_validation(tmp_path):
@@ -906,30 +958,41 @@ def test_tailor_resume_draft_schema_and_hydration_validation(tmp_path):
     assert "edit_plan" in generic_diagnostics["extra_fields"]
 
     hydrated_swap = runtime._hydrate_tailor_resume_call(raw_call, contract)
-    assert hydrated_swap.arguments["edit_plan"]["project_swap"] is None
+    expected_initial_swap = (
+        runtime.state.fit_analyses[ids[0]].projects.swap_suggestion
+    )
+    injected_initial_swap = hydrated_swap.arguments["edit_plan"]["project_swap"]
+    if expected_initial_swap is None:
+        assert injected_initial_swap is None
+    else:
+        assert injected_initial_swap["remove_project_id"] == (
+            expected_initial_swap.remove_project_id
+        )
+        assert injected_initial_swap["add_project_id"] == (
+            expected_initial_swap.add_project_id
+        )
 
     swap_job_id = next(
         job_id
         for job_id in ids
         if runtime.state.fit_analyses[job_id].projects.swap_suggestion is not None
     )
-    if swap_job_id != ids[0]:
+    swap_contract = runtime._next_action_contract()
+    while swap_contract["target_job_id"] != swap_job_id:
+        runtime.state.draft_resumes[swap_contract["target_job_id"]] = object()
         swap_contract = runtime._next_action_contract()
-        while swap_contract["target_job_id"] != swap_job_id:
-            runtime.state.draft_resumes[swap_contract["target_job_id"]] = object()
-            swap_contract = runtime._next_action_contract()
-        swap_plan = valid_resume_plan(
-            runtime.registry._job(swap_job_id),
-            runtime.state.fit_analyses[swap_job_id],
-            runtime.registry.bundle,
+    swap_plan = valid_resume_plan(
+        runtime.registry._job(swap_job_id),
+        runtime.state.fit_analyses[swap_job_id],
+        runtime.registry.bundle,
+    )
+    swap_draft = _compact_draft_from_plan(swap_plan, swap_job_id)
+    swap_draft["project_swap_reason"] = None
+    with pytest.raises(ToolArgumentsError, match="draft schema rejection"):
+        runtime._hydrate_tailor_resume_call(
+            _tool("tailor_resume", swap_draft, 8),
+            swap_contract,
         )
-        swap_draft = _compact_draft_from_plan(swap_plan, swap_job_id)
-        swap_draft["project_swap_reason"] = None
-        with pytest.raises(ToolArgumentsError, match="draft schema rejection"):
-            runtime._hydrate_tailor_resume_call(
-                _tool("tailor_resume", swap_draft, 8),
-                swap_contract,
-            )
 
 
 class AlwaysInvalidClient:
@@ -1486,7 +1549,56 @@ def test_hydration_injects_exact_citations_and_ids(tmp_path):
     assert hydrated.arguments["edit_plan"]["skill_section_edits"] == []
     assert hydrated.arguments["job_id"] == job_id
     assert hydrated.arguments["edit_plan"]["job_id"] == job_id
-    assert hydrated.arguments["edit_plan"]["project_swap"] is None
+    expected_swap = runtime.state.fit_analyses[job_id].projects.swap_suggestion
+    hydrated_project_swap = hydrated.arguments["edit_plan"]["project_swap"]
+    if expected_swap is None:
+        assert hydrated_project_swap is None
+    else:
+        assert hydrated_project_swap["remove_project_id"] == expected_swap.remove_project_id
+        assert hydrated_project_swap["add_project_id"] == expected_swap.add_project_id
+
+
+def test_hydration_adds_matching_memory_fact_to_summary_citations(tmp_path):
+    runtime = _runtime_at_tailoring(tmp_path)
+    assert runtime.registry is not None
+
+    fact = _memory_fact(
+        "candidate_fact",
+        fact_id="fact-summary-collaboration",
+        statement=(
+            "I regularly collaborated with product managers and engineers to "
+            "translate requirements into deployable AI and machine learning features."
+        ),
+        normalized_value=(
+            "Cross-functional collaboration with product and engineering teams"
+        ),
+    )
+    runtime.registry.memory = runtime.registry.memory.model_copy(
+        update={"facts": [fact]}
+    )
+
+    contract, raw_call = _valid_compact_tailor_call(runtime)
+    raw_call.arguments["professional_summary"]["new_text"] += (
+        " Cross-functional collaboration with product and engineering teams."
+    )
+
+    hydrated = runtime._hydrate_tailor_resume_call(raw_call, contract)
+    citations = hydrated.arguments["edit_plan"]["professional_summary"][
+        "citations"
+    ]
+    memory_citations = [
+        citation
+        for citation in citations
+        if citation["source_type"] == "memory_fact"
+    ]
+
+    assert len(memory_citations) == 1
+    assert memory_citations[0] == {
+        "source_type": "memory_fact",
+        "source_id": "fact-summary-collaboration",
+        "source_field": "normalized_value",
+        "evidence_id": None,
+    }
 
 
 def test_semantic_text_recovery_after_role_phrase_failure(tmp_path):
@@ -1518,9 +1630,22 @@ def test_semantic_text_recovery_after_role_phrase_failure(tmp_path):
     runtime._clear_tailor_patch_recovery()
     hydrated1 = runtime._hydrate_tailor_resume_call(call, contract)
     hydrated2 = runtime._hydrate_tailor_resume_call(call2, contract2)
-    assert (
-        hydrated1.arguments["edit_plan"]["professional_summary"]["citations"]
-        == hydrated2.arguments["edit_plan"]["professional_summary"]["citations"]
+    citations1 = hydrated1.arguments["edit_plan"]["professional_summary"][
+        "citations"
+    ]
+    citations2 = hydrated2.arguments["edit_plan"]["professional_summary"][
+        "citations"
+    ]
+
+    assert citations1[:2] == citations2[:2]
+    assert any(
+        citation["source_type"] == "memory_fact"
+        and citation["source_id"] == "fact-86b20add0a686f814a85"
+        for citation in citations1
+    )
+    assert not any(
+        citation["source_type"] == "memory_fact"
+        for citation in citations2
     )
 
 
@@ -1652,6 +1777,21 @@ def test_model_call_payload_diagnostics_are_recorded_not_in_messages(tmp_path):
     assert "model_message_count" not in runtime.conversation[-1]["content"]
 
 
+def test_tailor_required_shape_embeds_exact_role_phrase():
+    shape = JobSearchAgentRuntime._tailor_draft_required_shape(
+        "job-test",
+        has_project_swap=False,
+        required_role_phrase="AI engineer",
+    )
+
+    summary_placeholder = shape["professional_summary"]["new_text"]
+
+    assert summary_placeholder.startswith("AI engineer")
+    assert summary_placeholder == (
+        "AI engineer with <evidence-grounded qualifications>"
+    )
+
+
 def test_required_role_phrase_validation(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
     contract = _tailoring_contract(runtime)
@@ -1709,7 +1849,14 @@ def test_dynamic_project_swap_schema(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
     assert runtime.state is not None
     ids = runtime.state.top_3_job_ids
-    no_swap_contract = runtime._next_action_contract()
+    no_swap_job_id = next(
+        job_id
+        for job_id in ids
+        if runtime.state.fit_analyses[job_id].projects.swap_suggestion is None
+    )
+    no_swap_rank = ids.index(no_swap_job_id) + 1
+    no_swap_contract = _contract_for_rank(runtime, no_swap_rank)
+    assert no_swap_contract["target_job_id"] == no_swap_job_id
     assert no_swap_contract["project_swap_required"] is False
     with pytest.raises(ToolArgumentsError, match="draft schema rejection"):
         runtime._parse_tailor_draft_arguments(
@@ -1742,10 +1889,9 @@ def test_dynamic_project_swap_schema(tmp_path):
         for job_id in ids
         if runtime.state.fit_analyses[job_id].projects.swap_suggestion is not None
     )
-    swap_contract = runtime._next_action_contract()
-    while swap_contract["target_job_id"] != swap_job_id:
-        runtime.state.draft_resumes[swap_contract["target_job_id"]] = object()
-        swap_contract = runtime._next_action_contract()
+    swap_rank = ids.index(swap_job_id) + 1
+    swap_contract = _contract_for_rank(runtime, swap_rank)
+    assert swap_contract["target_job_id"] == swap_job_id
     assert swap_contract["project_swap_required"] is True
     with pytest.raises(ToolArgumentsError, match="draft schema rejection"):
         runtime._parse_tailor_draft_arguments(
@@ -1795,10 +1941,14 @@ def _contract_for_rank(runtime, rank: int):
 def test_evidence_reconciliation_is_disjoint_and_fixture_correct(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
     assert runtime.state is not None
-    rank3_id = runtime.state.top_3_job_ids[2]
-    raw = copy.deepcopy(runtime.state.fit_analyses[rank3_id])
-    reconciled = runtime._reconcile_tailoring_evidence(rank3_id)
-    unchanged = runtime.state.fit_analyses[rank3_id]
+    flash_id = next(
+        job_id
+        for job_id in runtime.state.top_3_job_ids
+        if runtime.registry._job(job_id).company == "Flash AI"
+    )
+    raw = copy.deepcopy(runtime.state.fit_analyses[flash_id])
+    reconciled = runtime._reconcile_tailoring_evidence(flash_id)
+    unchanged = runtime.state.fit_analyses[flash_id]
 
     assert unchanged.core_skills.genuine_gaps == raw.core_skills.genuine_gaps
     assert unchanged.core_skills.aligned_skills == raw.core_skills.aligned_skills
@@ -1837,7 +1987,8 @@ def test_evidence_reconciliation_is_disjoint_and_fixture_correct(tmp_path):
     assert not aligned_keys & gap_keys
     assert not evidenced_keys & gap_keys
 
-    contract = _contract_for_rank(runtime, 3)
+    flash_rank = runtime.state.top_3_job_ids.index(flash_id) + 1
+    contract = _contract_for_rank(runtime, flash_rank)
     context = contract["target_context"]
     assert context["genuine_gaps"] == reconciled.genuine_gaps
     assert context["aligned_skills"] == reconciled.aligned_skills
@@ -2029,11 +2180,17 @@ def test_rejection_category_mapping(tmp_path):
 def test_rank3_simultaneous_invalid_fields_patch_preserves_swap_reason(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
     runtime.state.model_call_count = 6
-    contract = _contract_for_rank(runtime, 3)
-    if not contract["project_swap_required"]:
-        pytest.skip("Rank 3 fixture has no project swap in this dataset")
     assert runtime.registry is not None
     assert runtime.state is not None
+    swap_job_id = next(
+        job_id
+        for job_id in runtime.state.top_3_job_ids
+        if runtime.state.fit_analyses[job_id].projects.swap_suggestion is not None
+    )
+    swap_rank = runtime.state.top_3_job_ids.index(swap_job_id) + 1
+    contract = _contract_for_rank(runtime, swap_rank)
+    assert contract["target_job_id"] == swap_job_id
+    assert contract["project_swap_required"] is True
     job_id = contract["target_job_id"]
     job = runtime.registry._job(job_id)
     plan = valid_resume_plan(
@@ -2057,7 +2214,12 @@ def test_rank3_simultaneous_invalid_fields_patch_preserves_swap_reason(tmp_path)
 
 def test_build_resume_execution_fit_analysis_rank3_fixture(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
-    job_id = runtime.state.top_3_job_ids[2]
+    assert runtime.registry is not None
+    job_id = next(
+        candidate_id
+        for candidate_id in runtime.state.top_3_job_ids
+        if runtime.registry._job(candidate_id).company == "Flash AI"
+    )
     raw = runtime.state.fit_analyses[job_id]
     execution = runtime._build_resume_execution_fit_analysis(job_id)
 
@@ -2123,7 +2285,12 @@ def test_data_pipelines_not_rejected_as_genuine_gap_with_execution_copy(tmp_path
     )
 
     runtime = _runtime_at_tailoring(tmp_path)
-    job_id = runtime.state.top_3_job_ids[2]
+    assert runtime.registry is not None
+    job_id = next(
+        candidate_id
+        for candidate_id in runtime.state.top_3_job_ids
+        if runtime.registry._job(candidate_id).company == "Flash AI"
+    )
     raw = runtime.state.fit_analyses[job_id]
     execution = runtime._build_resume_execution_fit_analysis(job_id)
     text = "AI engineer with SQL data pipelines and Python ML systems."
@@ -2153,7 +2320,12 @@ def test_data_pipelines_not_rejected_as_genuine_gap_with_execution_copy(tmp_path
 
 def test_build_resume_execution_bundle_rank3_promotes_data_pipelines(tmp_path):
     runtime = _runtime_at_tailoring(tmp_path)
-    job_id = runtime.state.top_3_job_ids[2]
+    assert runtime.registry is not None
+    job_id = next(
+        candidate_id
+        for candidate_id in runtime.state.top_3_job_ids
+        if runtime.registry._job(candidate_id).company == "Flash AI"
+    )
     assert runtime.registry is not None
     raw_bundle = runtime.registry.bundle
     raw_record = raw_bundle.get_evidence("EV-EXP-BULLET-001")
@@ -2184,9 +2356,15 @@ def test_raw_candidate_bundle_preserved_after_successful_tailor_execution(
         "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
     )
     runtime = _runtime_at_tailoring(tmp_path)
-    contract = _contract_for_rank(runtime, 3)
-    job_id = contract["target_job_id"]
     assert runtime.registry is not None
+    flash_job_id = next(
+        candidate_id
+        for candidate_id in runtime.state.top_3_job_ids
+        if runtime.registry._job(candidate_id).company == "Flash AI"
+    )
+    flash_rank = runtime.state.top_3_job_ids.index(flash_job_id) + 1
+    contract = _contract_for_rank(runtime, flash_rank)
+    job_id = contract["target_job_id"]
     raw_bundle = runtime.registry.bundle
     raw_bundle_snapshot = copy.deepcopy(raw_bundle.model_dump())
     raw_record_snapshot = copy.deepcopy(
@@ -2308,9 +2486,15 @@ def test_rank3_data_pipelines_execution_no_genuine_gap_rejection(
         "src.tools.resume_tailoring.compile_resume_pdf", fake_resume_compiler
     )
     runtime = _runtime_at_tailoring(tmp_path)
-    contract = _contract_for_rank(runtime, 3)
-    job_id = contract["target_job_id"]
     assert runtime.registry is not None
+    flash_job_id = next(
+        candidate_id
+        for candidate_id in runtime.state.top_3_job_ids
+        if runtime.registry._job(candidate_id).company == "Flash AI"
+    )
+    flash_rank = runtime.state.top_3_job_ids.index(flash_job_id) + 1
+    contract = _contract_for_rank(runtime, flash_rank)
+    job_id = contract["target_job_id"]
     job = runtime.registry._job(job_id)
     plan = valid_resume_plan(
         job,
@@ -2415,6 +2599,16 @@ def _runtime_at_cover_letter(tmp_path, *, rank: int = 1, cover_letter_date=None)
     return runtime
 
 
+def _primary_claims_by_job(tmp_path, scores):
+    claims = {}
+    for index, score in enumerate(scores):
+        probe_path = tmp_path / f"claim-probe-{index}"
+        probe_path.mkdir(parents=True, exist_ok=True)
+        probe = _runtime_at_cover_letter(probe_path, rank=index + 1)
+        claims[score.job_id] = probe._allowed_candidate_claim_texts(score.job_id)[0]
+    return claims
+
+
 def _cover_letter_contract(runtime, *, rank: int = 1):
     contract = runtime._next_action_contract()
     assert contract["allowed_tool"] == "generate_cover_letter"
@@ -2431,6 +2625,7 @@ def _valid_compact_cover_call(runtime, *, rank: int = 1):
         cover_plans[job_id],
         job_id,
         allowed_hook=allowed_hook,
+        primary_claim=runtime._allowed_candidate_claim_texts(job_id)[0],
     )
     return contract, _tool("generate_cover_letter", draft, rank)
 
@@ -2581,11 +2776,9 @@ def test_cover_letter_skill_repair_preserves_valid_hook(tmp_path):
     registry = runtime._build_cover_letter_allowed_skill_registry(
         contract["target_job_id"]
     )
-    eleven_skills = [entry.display_name for entry in registry.values()][:11]
-    if len(eleven_skills) < 9:
-        eleven_skills = eleven_skills + [
-            f"Extra-{index}" for index in range(9 - len(eleven_skills))
-        ]
+    allowed_skills = [entry.display_name for entry in registry.values()]
+    assert len(allowed_skills) >= 3
+    eleven_skills = (allowed_skills * 9)[:9]
     bad_skills_call = _tool(
         "generate_cover_letter",
         {
@@ -2844,6 +3037,7 @@ def test_all_top3_cover_letters_share_one_letter_date(tmp_path):
             cover_plans[job_id],
             job_id,
             allowed_hook=allowed_hook,
+            primary_claim=runtime._allowed_candidate_claim_texts(job_id)[0],
         )
         hydrated = runtime._hydrate_cover_letter_call(
             _tool("generate_cover_letter", draft, rank),
@@ -3118,9 +3312,9 @@ def test_cover_letter_patch_model_call_metadata(tmp_path):
     registry = runtime._build_cover_letter_allowed_skill_registry(
         contract["target_job_id"]
     )
-    too_many_skills = [entry.display_name for entry in registry.values()]
-    while len(too_many_skills) < 9:
-        too_many_skills.append(f"Pad-{len(too_many_skills)}")
+    allowed_skills = [entry.display_name for entry in registry.values()]
+    assert len(allowed_skills) >= 3
+    too_many_skills = (allowed_skills * 9)[:9]
     runtime.state.model_call_count = 1
     runtime._execute_response_calls(
         NormalizedAssistantMessage(
@@ -3251,6 +3445,7 @@ def test_allowed_company_hooks_pass_cover_letter_tool_validator(tmp_path, monkey
             _workflow_plans()[3][job_id],
             job_id,
             allowed_hook=hook,
+            primary_claim=runtime._allowed_candidate_claim_texts(job_id)[0],
         )
         hydrated = runtime._hydrate_cover_letter_call(
             _tool("generate_cover_letter", draft, rank),
@@ -3533,7 +3728,10 @@ def test_paragraph_closure_adds_skill_citation_from_skills_section(tmp_path, mon
         for job_id in ids
         if runtime.registry._job(job_id).company == "Flash AI"
     )
-    runtime.state.cover_letters = {ids[0]: object(), ids[1]: object()}
+    flash_index = ids.index(flash_job_id)
+    runtime.state.cover_letters = {
+        ids[index]: object() for index in range(flash_index)
+    }
     contract = runtime._next_action_contract()
     assert contract["target_job_id"] == flash_job_id
     allowed_hook = runtime._select_allowed_company_hooks(flash_job_id)[0]
@@ -3703,6 +3901,7 @@ def test_calls_11_16_cover_letter_regression_sequence(tmp_path, monkeypatch):
                 cover_plans[job_id],
                 job_id,
                 allowed_hook=hook,
+                primary_claim=runtime._allowed_candidate_claim_texts(job_id)[0],
             )
         runtime.state.model_call_count = rank
         valid, invalid = runtime._execute_response_calls(
@@ -3721,6 +3920,48 @@ def test_calls_11_16_cover_letter_regression_sequence(tmp_path, monkeypatch):
     hydrated = runtime.state.cover_letters[flash_job_id]
     assert hydrated is not None
 
+
+def test_cover_letter_assembly_makes_fragment_claim_grammatical():
+    runtime = JobSearchAgentRuntime.__new__(JobSearchAgentRuntime)
+    claim = "Cross-functional collaboration with product and engineering teams"
+
+    assembled = runtime._assemble_paragraph_text(
+        "My background aligns with the practical responsibilities of this role",
+        claim,
+        "This evidence demonstrates a disciplined and collaborative approach",
+    )
+
+    assert claim in assembled
+    assert assembled.count(claim) == 1
+    assert (
+        "One documented example from my background is the following: "
+        + claim
+        + "."
+    ) in assembled
+    assert "engineering teams This evidence" not in assembled
+    assert "engineering teams. This evidence" in assembled
+
+
+
+def test_cover_letter_assembly_replaces_duplicate_application_lead():
+    claim = "Cross-functional collaboration with product and engineering teams"
+    text = JobSearchAgentRuntime._assemble_paragraph_text(
+        "I am excited to apply for the AI Engineer position at Example Company.",
+        claim,
+        "This experience aligns well with the requirements of the role.",
+    )
+
+    assert text.startswith(
+        "My background aligns well with this opportunity."
+    )
+    assert "I am excited to apply" not in text
+    assert (
+        "One documented example from my background is the following: "
+        f"{claim}."
+    ) in text
+    assert text.endswith(
+        "This experience aligns well with the requirements of the role."
+    )
 
 def test_cover_letter_assembly_preserves_exact_claim_substring(tmp_path):
     runtime = _runtime_at_cover_letter(tmp_path)
@@ -3950,13 +4191,11 @@ def test_top3_cover_letters_repair_wrapper_lengths_in_same_turn(tmp_path, monkey
     jobs = load_jobs(ROOT / "data/AI_ML_Jobs_Dataset_20.csv")
     accepted = filtering_tool(jobs, bundle.profile).accepted_jobs
     accepted_by_id = {job.job_id: job for job in accepted}
-    chickasaw_id = next(
-        job_id
-        for job_id in ids
-        if accepted_by_id[job_id].company == "Chickasaw Nation Industries"
-    )
     flash_id = next(
         job_id for job_id in ids if accepted_by_id[job_id].company == "Flash AI"
+    )
+    long_wrapper_job_id = next(
+        job_id for job_id in ids if job_id != flash_id
     )
 
     cover_responses = []
@@ -3966,8 +4205,9 @@ def test_top3_cover_letters_repair_wrapper_lengths_in_same_turn(tmp_path, monkey
             cover_plans[job_id],
             job_id,
             allowed_hook=probe._select_allowed_company_hooks(job_id)[0],
+            primary_claim=probe._allowed_candidate_claim_texts(job_id)[0],
         )
-        if job_id == chickasaw_id:
+        if job_id == long_wrapper_job_id:
             draft["body_paragraph_1"] = {
                 **draft["body_paragraph_1"],
                 "lead_in": _repeat_words(40, prefix="lead"),
@@ -3984,7 +4224,12 @@ def test_top3_cover_letters_repair_wrapper_lengths_in_same_turn(tmp_path, monkey
             )
         )
 
-    responses = _responses(scores, resume_plans, cover_plans)
+    responses = _responses(
+        scores,
+        resume_plans,
+        cover_plans,
+        primary_claims_by_job=_primary_claims_by_job(tmp_path, scores),
+    )
     responses = responses[:-3] + cover_responses
 
     tracer = NoOpAgentTracer()
@@ -4404,7 +4649,12 @@ def test_top3_cover_letters_with_flash_data_pipelines_claim(tmp_path, monkeypatc
             )
         )
 
-    responses = _responses(scores, resume_plans, cover_plans)
+    responses = _responses(
+        scores,
+        resume_plans,
+        cover_plans,
+        primary_claims_by_job=_primary_claims_by_job(tmp_path, scores),
+    )
     responses = responses[:-3] + cover_responses
 
     tracer = NoOpAgentTracer()
@@ -4423,7 +4673,14 @@ def test_top3_cover_letters_with_flash_data_pipelines_claim(tmp_path, monkeypatc
         if item.name == "tool_call:generate_cover_letter"
     ]
     assert len(tool_calls) == 3
-    flash_paragraph = tool_calls[-1].input["arguments"]["plan"]["body_paragraphs"][0]["text"]
+    flash_tool_call = next(
+        item
+        for item in tool_calls
+        if item.input["arguments"]["plan"]["job_id"] == flash_id
+    )
+    flash_paragraph = (
+        flash_tool_call.input["arguments"]["plan"]["body_paragraphs"][0]["text"]
+    )
     assert FLASH_CALL_13_CLAIM in flash_paragraph
     for job_id in ids:
         assert runtime.state.cover_letters[job_id].page_count == 1

@@ -122,10 +122,10 @@ def test_actual_filtered_dataset_scoring_invariants(
     accepted = filtering_tool(jobs, repository_bundle.profile).accepted_jobs
     result = scoring_tool(accepted, repository_bundle, repository_memory)
 
-    assert len(accepted) == 6
-    assert result.total_scored == 6
+    assert len(accepted) == 5
+    assert result.total_scored == 5
     assert len(result.top_3) == 3
-    assert [job.rank for job in result.ranked_jobs] == list(range(1, 7))
+    assert [job.rank for job in result.ranked_jobs] == list(range(1, 6))
     assert result.ranked_jobs == sorted(
         result.ranked_jobs,
         key=lambda item: item.rank,
@@ -133,6 +133,15 @@ def test_actual_filtered_dataset_scoring_invariants(
     final_scores = [job.final_score for job in result.ranked_jobs]
     assert final_scores == sorted(final_scores, reverse=True)
     assert result.memory_fact_count == len(repository_memory.facts)
+    assert (
+        result.memory_skill_fact_count
+        + result.memory_candidate_fact_count
+        == result.memory_fact_count
+    )
+    assert sorted(
+        result.memory_skill_fact_ids + result.memory_candidate_fact_ids
+    ) == sorted(fact.fact_id for fact in repository_memory.facts)
+    assert "candidate_fact entries are considered" in result.memory_scoring_policy
 
     for job_score in result.ranked_jobs:
         assert 0 <= job_score.final_score <= 100
@@ -218,6 +227,10 @@ def test_memory_skill_fact_improves_skill_score(
     assert evidence.matched is True
     assert any(source.source_type == "memory" for source in evidence.evidence_sources)
     assert result.memory_fact_count == 1
+    assert result.memory_skill_fact_count == 1
+    assert result.memory_candidate_fact_count == 0
+    assert result.memory_skill_fact_ids == ["fact-skill-001"]
+    assert result.memory_candidate_fact_ids == []
 
 
 def test_candidate_fact_does_not_become_skill(
@@ -240,6 +253,11 @@ def test_candidate_fact_does_not_become_skill(
     job = make_job(required_skills=["Prefers healthcare roles"])
     result = scoring_tool([job], repository_bundle, memory)
     assert result.ranked_jobs[0].unmatched_required_skills == ["Prefers healthcare roles"]
+    assert result.memory_skill_fact_count == 0
+    assert result.memory_candidate_fact_count == 1
+    assert result.memory_skill_fact_ids == []
+    assert result.memory_candidate_fact_ids == ["fact-candidate-001"]
+    assert "do not directly change" in result.memory_scoring_policy
 
 
 def test_empty_memory_scores_successfully(
@@ -256,6 +274,10 @@ def test_empty_memory_scores_successfully(
     result = scoring_tool([job], repository_bundle, empty_memory)
 
     assert result.memory_fact_count == 0
+    assert result.memory_skill_fact_count == 0
+    assert result.memory_candidate_fact_count == 0
+    assert result.memory_skill_fact_ids == []
+    assert result.memory_candidate_fact_ids == []
     assert result.ranked_jobs[0].matched_required_skills == ["Python"]
 
 
@@ -449,3 +471,47 @@ def test_skill_universe_uses_whole_profile(
     assert "project" in source_types
     assert "evidence" in source_types
     assert "memory" in source_types
+
+def test_resume_tex_only_skill_contributes_to_scoring(
+    tmp_path: Path,
+    repository_bundle: CandidateBundle,
+) -> None:
+    """A skill found only in the LaTeX resume becomes auditable score evidence."""
+    resume_tex = tmp_path / "resume_only.tex"
+    resume_tex.write_text(
+        "\n".join(
+            [
+                r"\documentclass{article}",
+                r"\begin{document}",
+                r"\section{Skills}",
+                r"\begin{itemize}",
+                r"\small\item{\textbf{Systems:} ResumeOnlyOrchestration}",
+                r"\end{itemize}",
+                r"\end{document}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    empty_memory = CandidateMemory(
+        schema_version="1.0",
+        candidate_id=CANDIDATE_ID,
+        facts=[],
+    )
+    job = make_job(required_skills=["ResumeOnlyOrchestration"])
+
+    result = scoring_tool(
+        [job],
+        repository_bundle,
+        empty_memory,
+        resume_tex,
+    )
+
+    evidence = result.ranked_jobs[0].matched_skill_evidence[0]
+    assert evidence.matched is True
+    assert any(
+        source.source_type == "resume_tex"
+        and source.source_id == "resume_only.tex"
+        for source in evidence.evidence_sources
+    )
+    assert result.resume_skill_count == 1
+
