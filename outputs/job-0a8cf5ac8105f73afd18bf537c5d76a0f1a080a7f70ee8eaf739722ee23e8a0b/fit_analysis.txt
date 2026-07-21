@@ -5,7 +5,7 @@ Relevant Experience
 ✅ Internship experience at Copper Finch Systems supports additional overlap with ai, data, model. [job_posting] [EV-EXP-002]
 
 Seniority
-✅ No reliable explicit minimum is stated; candidate experience of 3 years aligns with the deterministic scoring experience component (100.0). [cand-mira-solenne-001] [job_posting] [job_posting]
+✅ Candidate has 3 years of experience, meeting the posting minimum of 3 years (exact). [cand-mira-solenne-001] [job_posting]
 
 Education
 ✅ Candidate education M.S. in Applied Data Science satisfies explicit posting education keywords. [job_posting] [EV-EDU-001]

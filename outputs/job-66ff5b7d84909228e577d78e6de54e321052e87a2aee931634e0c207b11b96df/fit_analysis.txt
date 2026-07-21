@@ -1,0 +1,21 @@
+Tell me why this job is a good fit for me.
+
+Relevant Experience
+✅ Primary experience bullet exp-primary-bullet-3 aligns with the posting through AWS, ai, model. [job_posting] [EV-EXP-BULLET-003] [EV-EXP-001]
+✅ Internship experience at Copper Finch Systems supports additional overlap with ai, data, model. [job_posting] [EV-EXP-002]
+
+Seniority
+✅ Candidate has 3 years of experience, meeting the posting minimum of 2 years (exact). [cand-mira-solenne-001] [job_posting]
+
+Education
+✅ Candidate education M.S. in Applied Data Science satisfies explicit posting education keywords. [job_posting] [EV-EDU-001]
+
+Core Skills
+✅ Aligned: RAG, AWS, evaluation, monitoring, MLOps
+❌ Missing but evidenced in your profile: None
+❌ Genuine gaps: LLMs, multi-agent orchestration, GCP, model lifecycle, security, customer-facing AI, prototyping, governance
+
+Projects
+❌ Current resume project GridPulse Load Forecaster has the lowest internal fit score (0.0) for this posting. [job_posting] [EV-PROJ-006]
+✅ Current resume project ModelWatch Release Guard is the strongest project match (15.23) for this posting. [job_posting] [EV-PROJ-003]
+ℹ️ No valid project swap meets the threshold; the current base-resume projects are the best available evidence set for this role. [job_posting] [EV-PROJ-003]

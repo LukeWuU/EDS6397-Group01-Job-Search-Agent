@@ -2,7 +2,7 @@
   "job_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
   "title": "AI Engineer | Camden Corporate Office (Remote Position)",
   "company": "Camden Property Trust",
-  "score_rank": 2,
+  "score_rank": 1,
   "final_score": 72.0,
   "relevant_experience": {
     "findings": [
@@ -58,7 +58,7 @@
   "seniority": {
     "primary_finding": {
       "status": "aligned",
-      "summary": "No reliable explicit minimum is stated; candidate experience of 3 years aligns with the deterministic scoring experience component (100.0).",
+      "summary": "Candidate has 3 years of experience, meeting the posting minimum of 3 years (exact).",
       "citations": [
         {
           "source_type": "candidate_profile",
@@ -72,13 +72,6 @@
           "source_id": "job_posting",
           "source_field": "experience_requirement_raw",
           "supported_claim": "3+ years in software engineering or applied ML and 1+ year with generative AI or LLM applications",
-          "evidence_id": null
-        },
-        {
-          "source_type": "job_posting",
-          "source_id": "job_posting",
-          "source_field": "title",
-          "supported_claim": "AI Engineer | Camden Corporate Office (Remote Position)",
           "evidence_id": null
         }
       ]
@@ -607,8 +600,8 @@
       ]
     }
   ],
-  "formatted_text": "Tell me why this job is a good fit for me.\n\nRelevant Experience\n✅ Primary experience bullet exp-primary-bullet-1 aligns with the posting through Python, ai, data, model, python. [job_posting] [EV-EXP-BULLET-001] [EV-EXP-001]\n✅ Internship experience at Copper Finch Systems supports additional overlap with ai, data, model. [job_posting] [EV-EXP-002]\n\nSeniority\n✅ No reliable explicit minimum is stated; candidate experience of 3 years aligns with the deterministic scoring experience component (100.0). [cand-mira-solenne-001] [job_posting] [job_posting]\n\nEducation\n✅ Candidate education M.S. in Applied Data Science satisfies explicit posting education keywords. [job_posting] [EV-EDU-001]\n\nCore Skills\n✅ Aligned: Python, REST APIs, vector databases, prompt engineering, RAG, MLOps, evaluation\n❌ Missing but evidenced in your profile: None\n❌ Genuine gaps: Azure OpenAI, Anthropic, AWS Bedrock, agent frameworks, LLMOps, Microsoft Copilot Studio, responsible AI\n\nProjects\n❌ Current resume project GridPulse Load Forecaster has the lowest internal fit score (4.29) for this posting. [job_posting] [EV-PROJ-006]\n✅ Current resume project ModelWatch Release Guard is the strongest project match (14.57) for this posting. [job_posting] [EV-PROJ-003]\n❌ Swap suggestion: replace GridPulse Load Forecaster with CarePath Evidence Navigator (+17.14 internal fit points). [job_posting] [EV-PROJ-006] [EV-PROJ-001]",
-  "evidence_citation_count": 27,
+  "formatted_text": "Tell me why this job is a good fit for me.\n\nRelevant Experience\n✅ Primary experience bullet exp-primary-bullet-1 aligns with the posting through Python, ai, data, model, python. [job_posting] [EV-EXP-BULLET-001] [EV-EXP-001]\n✅ Internship experience at Copper Finch Systems supports additional overlap with ai, data, model. [job_posting] [EV-EXP-002]\n\nSeniority\n✅ Candidate has 3 years of experience, meeting the posting minimum of 3 years (exact). [cand-mira-solenne-001] [job_posting]\n\nEducation\n✅ Candidate education M.S. in Applied Data Science satisfies explicit posting education keywords. [job_posting] [EV-EDU-001]\n\nCore Skills\n✅ Aligned: Python, REST APIs, vector databases, prompt engineering, RAG, MLOps, evaluation\n❌ Missing but evidenced in your profile: None\n❌ Genuine gaps: Azure OpenAI, Anthropic, AWS Bedrock, agent frameworks, LLMOps, Microsoft Copilot Studio, responsible AI\n\nProjects\n❌ Current resume project GridPulse Load Forecaster has the lowest internal fit score (4.29) for this posting. [job_posting] [EV-PROJ-006]\n✅ Current resume project ModelWatch Release Guard is the strongest project match (14.57) for this posting. [job_posting] [EV-PROJ-003]\n❌ Swap suggestion: replace GridPulse Load Forecaster with CarePath Evidence Navigator (+17.14 internal fit points). [job_posting] [EV-PROJ-006] [EV-PROJ-001]",
+  "evidence_citation_count": 26,
   "genuine_gap_count": 7,
   "evidenced_missing_skill_count": 0,
   "project_swap_recommended": true

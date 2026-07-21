@@ -10,7 +10,7 @@ This project was developed for EDS 6397: Generative AI and Applications.
 - Exactly five assignment-level tools are exposed to the model.
 - Deterministic filtering and scoring select the Top 3 jobs.
 - Resume and cover-letter claims must be supported by candidate, job, project, or approved-memory evidence.
-- One continuous Human Review session supports up to two decision rounds.
+- One continuous Human Review session supports up to two revision rounds (three decision rounds total).
 - Candidate-approved facts persist in `memory.json`.
 - Langfuse records the complete agent trace.
 - Final resumes and cover letters are compiled as one-page PDFs.
@@ -152,7 +152,7 @@ The reviewer can:
 - Reject a draft and provide revision instructions
 - Add a candidate-approved fact to persistent memory
 
-Rejected drafts may be revised during a second decision round. The workflow supports no more than two Human Review decision rounds.
+Rejected drafts may be reworked through at most two revision rounds. The initial review plus two revisions may produce up to three decision rounds within the same continuous Human Review pause.
 
 Approved facts become available to later revisions during the same run and persist for future runs.
 
@@ -358,7 +358,7 @@ python -m pytest -q
 Final verified result:
 
 ```text
-295 passed in 63.61s
+306 passed in 59.55s
 ```
 
 The tests cover configuration, input loading, deterministic tools, evidence validation, resume and cover-letter generation, Human Review, persistent memory, tracing, output safety, and end-to-end runtime behavior.
@@ -379,27 +379,29 @@ When Langfuse is enabled, the workflow records:
 
 ### Final Verified Public Trace
 
-- Run ID: `run-8aed55694f044b749cb2bf1f5753db1c`
-- Trace ID: `9f30f905dc3557887ae384a93c92cfdf`
-- Model calls: `13`
+- Run ID: `run-0844998973e04708bee04f777fad4062`
+- Trace ID: `ed05e38e90dbc69e1d2f6a205ab1570b`
+- Model calls: `14`
 - Tool calls: `13`
-- Invalid tool attempts: `0`
+- Invalid tool attempts: `1`
 - Human Review pauses: `1`
-- Learned memory facts: `1`
+- Learned memory facts: `1` (`fact-86b20add0a686f814a85`)
 - Final resumes: `3`
 - Cover letters: `3`
+- Flash AI resume revision rounds: `2`
+- Final PDF validation: `9 of 9 PDFs readable and exactly one page`
 
 Public trace:
 
-https://us.cloud.langfuse.com/project/cmrpjxygx038lad0j7x3jo064/traces/9f30f905dc3557887ae384a93c92cfdf
+https://us.cloud.langfuse.com/project/cmrpjxygx038lad0j7x3jo064/traces/ed05e38e90dbc69e1d2f6a205ab1570b
 
 ## Final Verified Top 3
 
 The final run selected:
 
-1. Chickasaw Nation Industries — AI Engineer
-2. Camden Property Trust — AI Engineer, Camden Corporate Office
-3. Flash AI — AI Engineer
+1. Camden Property Trust — AI Engineer, Camden Corporate Office (Remote Position)
+2. Flash AI — AI Engineer
+3. BlackLine — AI Engineer
 
 All three final job folders passed output validation:
 
@@ -409,7 +411,7 @@ All three final job folders passed output validation:
 - Resume-after PDFs are one page
 - Cover-letter PDFs are one page
 - No zero-byte required files
-- No invalid tool attempts in the final run
+- One incomplete tool attempt was automatically retried, and the run completed successfully.
 
 ## Project Structure
 

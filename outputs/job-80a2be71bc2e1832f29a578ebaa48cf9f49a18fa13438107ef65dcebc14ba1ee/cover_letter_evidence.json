@@ -2,7 +2,7 @@
   "job_id": "80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee",
   "title": "AI Engineer",
   "company": "Flash AI",
-  "finalized_resume_revision": 1,
+  "finalized_resume_revision": 2,
   "company_hook": {
     "phrase": "Flash AI develops investigative software intended to help law-enforcement and public-safety",
     "citation": {
@@ -15,8 +15,8 @@
   },
   "body_paragraphs": [
     {
-      "text": "I am excited to apply for the AI Engineer position at Flash AI, where I can contribute to developing investigative software that supports law-enforcement and public-safety. Built Python and scikit-learn risk models over SQL data pipelines, raising validated recall by 14% while holding the false-positive rate constant. This experience aligns with the goals of Flash AI to deliver impactful solutions through AI engineering.",
-      "reason": "My background in building risk models demonstrates my ability to enhance predictive accuracy and support investigative workflows.",
+      "text": "My background aligns well with this opportunity. One documented example from my background is the following: Cross-functional collaboration with product and engineering teams. My experience in translating requirements into deployable AI and machine learning features aligns well with the collaborative nature of this role.",
+      "reason": "This opportunity allows me to leverage my skills in Python, RAG, and NLP to support Flash AI's mission.",
       "citations": [
         {
           "source_type": "job_posting",
@@ -104,11 +104,11 @@
       ]
     }
   ],
-  "closing_sentence": "I look forward to the opportunity to contribute to Flash AI's mission of supporting law-enforcement and public-safety through innovative AI solutions.",
+  "closing_sentence": "I look forward to the possibility of contributing to Flash AI's impactful work in law-enforcement and public-safety.",
   "output_paths": {
-    "tex": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter.tex",
-    "pdf": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter.pdf",
-    "evidence_log": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter_evidence.json"
+    "tex": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter.tex",
+    "pdf": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter.pdf",
+    "evidence_log": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter_evidence.json"
   },
   "compilation": {
     "command": [
@@ -118,16 +118,16 @@
       "cover_letter.tex"
     ],
     "return_code": 0,
-    "pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter.pdf",
+    "pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter.pdf",
     "page_count": 1,
-    "stdout_tail": "This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex.fmt)\n restricted \\write18 enabled.\nentering extended mode\n(cover_letter.tex\nLaTeX2e <2025-11-01>\nL3 programming layer <2025-12-24>\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/base\\article.cls\nDocument Class: article 2025/01/22 v1.4n Standard LaTeX document class\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/base\\size11.clo))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/l3backend\\l3backend-pdf\ntex.def)\nNo file cover_letter.aux.\n[1{C:/Users/17982/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]\n(cover_letter.aux) )<C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/type1/p\nublic/amsfonts/cm/cmbx10.pfb><C:/Users/17982/AppData/Local/Programs/MiKTeX/font\ns/type1/public/amsfonts/cm/cmbx12.pfb><C:/Users/17982/AppData/Local/Programs/Mi\nKTeX/fonts/type1/public/amsfonts/cm/cmr10.pfb>\nOutput written on cover_letter.pdf (1 page, 46736 bytes).\nTranscript written on cover_letter.log.\n",
+    "stdout_tail": "This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex.fmt)\n restricted \\write18 enabled.\nentering extended mode\n(cover_letter.tex\nLaTeX2e <2025-11-01>\nL3 programming layer <2025-12-24>\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/base\\article.cls\nDocument Class: article 2025/01/22 v1.4n Standard LaTeX document class\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/base\\size11.clo))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/l3backend\\l3backend-pdf\ntex.def)\nNo file cover_letter.aux.\n[1{C:/Users/17982/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]\n(cover_letter.aux) )<C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/type1/p\nublic/amsfonts/cm/cmbx10.pfb><C:/Users/17982/AppData/Local/Programs/MiKTeX/font\ns/type1/public/amsfonts/cm/cmbx12.pfb><C:/Users/17982/AppData/Local/Programs/Mi\nKTeX/fonts/type1/public/amsfonts/cm/cmr10.pfb>\nOutput written on cover_letter.pdf (1 page, 46101 bytes).\nTranscript written on cover_letter.log.\n",
     "stderr_tail": "pdflatex: major issue: So far, you have not checked for MiKTeX updates.\n"
   },
   "page_count": 1,
   "candidate_source_citation_count": 7,
   "job_source_citation_count": 2,
-  "deterministic_plan_digest": "5a860815f2387b346e8247efe774be859a034e6108d1dc80d43d6d1a8920d8bf",
-  "latex_sha256": "016c58a36a9a3a61e35a726234549e1d38c6d5ecea61bf8cb454aeef947cb50a",
-  "pdf_sha256": "245d0414eb0a7d7c38d3ee0ace780906f4926f5700db2b1f7446cd7b582ad970",
+  "deterministic_plan_digest": "e678ccd41fad8ab71eb2c0d0db89a87b411c0c0042517f30a5629484fc22b378",
+  "latex_sha256": "5047ba5cdb120b7fe43416e8157c6e6d343292bcf811dccf88c923af0bac2c45",
+  "pdf_sha256": "ed6fdfbe0327c81e7e33b297aa70de3a241fe1ecabe4ba83935216d81b3b71f0",
   "no_fabrication_validated": true
 }

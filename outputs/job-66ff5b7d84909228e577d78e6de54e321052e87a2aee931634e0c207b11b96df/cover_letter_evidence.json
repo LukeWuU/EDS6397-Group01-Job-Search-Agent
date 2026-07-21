@@ -1,0 +1,109 @@
+{
+  "job_id": "66ff5b7d84909228e577d78e6de54e321052e87a2aee931634e0c207b11b96df",
+  "title": "AI Engineer",
+  "company": "BlackLine",
+  "finalized_resume_revision": 0,
+  "company_hook": {
+    "phrase": "BlackLine provides cloud software that automates and controls accounting",
+    "citation": {
+      "source_type": "company_details",
+      "source_id": "66ff5b7d84909228e577d78e6de54e321052e87a2aee931634e0c207b11b96df",
+      "source_field": "company_details",
+      "evidence_id": null,
+      "supported_claim": "BlackLine provides cloud software that automates and controls accounting"
+    }
+  },
+  "body_paragraphs": [
+    {
+      "text": "My background aligns well with this opportunity. One documented example from my background is the following: Cross-functional collaboration with product and engineering teams. This experience aligns well with the collaborative nature of the AI Engineer role at BlackLine.",
+      "reason": "My background in translating requirements into deployable AI features demonstrates my ability to work effectively with cross-functional teams.",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "66ff5b7d84909228e577d78e6de54e321052e87a2aee931634e0c207b11b96df",
+          "source_field": "job_description",
+          "evidence_id": null,
+          "supported_claim": ""
+        },
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-3",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-003",
+          "supported_claim": ""
+        },
+        {
+          "source_type": "memory_fact",
+          "source_id": "fact-86b20add0a686f814a85",
+          "source_field": "normalized_value",
+          "evidence_id": null,
+          "supported_claim": ""
+        }
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "skill": "RAG",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-2",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-002",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "AWS",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-3",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-003",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "MLOps",
+      "citations": [
+        {
+          "source_type": "portfolio_project",
+          "source_id": "proj-model-watch",
+          "source_field": "short_description",
+          "evidence_id": "EV-PROJ-003",
+          "supported_claim": ""
+        }
+      ]
+    }
+  ],
+  "closing_sentence": "Thank you for considering my application. I look forward to the opportunity to contribute to BlackLine's mission.",
+  "output_paths": {
+    "tex": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\job-66ff5b7d84909228e577d78e6de54e321052e87a2aee931634e0c207b11b96df\\cover_letter.tex",
+    "pdf": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\job-66ff5b7d84909228e577d78e6de54e321052e87a2aee931634e0c207b11b96df\\cover_letter.pdf",
+    "evidence_log": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\job-66ff5b7d84909228e577d78e6de54e321052e87a2aee931634e0c207b11b96df\\cover_letter_evidence.json"
+  },
+  "compilation": {
+    "command": [
+      "pdflatex",
+      "-interaction=nonstopmode",
+      "-halt-on-error",
+      "cover_letter.tex"
+    ],
+    "return_code": 0,
+    "pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\job-66ff5b7d84909228e577d78e6de54e321052e87a2aee931634e0c207b11b96df\\cover_letter.pdf",
+    "page_count": 1,
+    "stdout_tail": "This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex.fmt)\n restricted \\write18 enabled.\nentering extended mode\n(cover_letter.tex\nLaTeX2e <2025-11-01>\nL3 programming layer <2025-12-24>\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/base\\article.cls\nDocument Class: article 2025/01/22 v1.4n Standard LaTeX document class\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/base\\size11.clo))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/l3backend\\l3backend-pdf\ntex.def)\nNo file cover_letter.aux.\n[1{C:/Users/17982/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]\n(cover_letter.aux) )<C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/type1/p\nublic/amsfonts/cm/cmbx10.pfb><C:/Users/17982/AppData/Local/Programs/MiKTeX/font\ns/type1/public/amsfonts/cm/cmbx12.pfb><C:/Users/17982/AppData/Local/Programs/Mi\nKTeX/fonts/type1/public/amsfonts/cm/cmr10.pfb>\nOutput written on cover_letter.pdf (1 page, 45690 bytes).\nTranscript written on cover_letter.log.\n",
+    "stderr_tail": "pdflatex: major issue: So far, you have not checked for MiKTeX updates.\n"
+  },
+  "page_count": 1,
+  "candidate_source_citation_count": 5,
+  "job_source_citation_count": 2,
+  "deterministic_plan_digest": "3634c6f8e7c91e2e91291e6c5036aa23504c4619b5fe8967df0d4cef4b9609fb",
+  "latex_sha256": "f2f8b6f693d84b1686f39fcd525baab94f2539b26ac2f7583239ff3c8af64720",
+  "pdf_sha256": "7088bf67f6e90fd7a398cd33cb55a518f1eb4d24a0d15e9473e2629454b524eb",
+  "no_fabrication_validated": true
+}

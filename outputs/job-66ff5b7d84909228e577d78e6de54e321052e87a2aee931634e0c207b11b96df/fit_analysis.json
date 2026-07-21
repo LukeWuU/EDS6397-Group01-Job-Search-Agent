@@ -1,28 +1,28 @@
 {
-  "job_id": "5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2",
+  "job_id": "66ff5b7d84909228e577d78e6de54e321052e87a2aee931634e0c207b11b96df",
   "title": "AI Engineer",
-  "company": "Chickasaw Nation Industries",
-  "score_rank": 1,
-  "final_score": 74.5,
+  "company": "BlackLine",
+  "score_rank": 3,
+  "final_score": 68.73,
   "relevant_experience": {
     "findings": [
       {
         "status": "aligned",
-        "summary": "Primary experience bullet exp-primary-bullet-1 aligns with the posting through Python, ai, data, model, python, scikit-learn.",
+        "summary": "Primary experience bullet exp-primary-bullet-3 aligns with the posting through AWS, ai, model.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
             "source_field": "required_skills",
-            "supported_claim": "Posting requires skills including Python, ai, data, model, python, scikit-learn.",
+            "supported_claim": "Posting requires skills including AWS, ai, model.",
             "evidence_id": null
           },
           {
             "source_type": "experience_bullet",
-            "source_id": "exp-primary-bullet-1",
+            "source_id": "exp-primary-bullet-3",
             "source_field": "text",
-            "supported_claim": "Built Python and scikit-learn risk models over SQL data pipelines, raising validated recall by 14% while holding the false-positive rate constant.",
-            "evidence_id": "EV-EXP-BULLET-001"
+            "supported_claim": "Containerized model services on AWS and added MLflow tracking, pytest checks, and drift alerts, cutting failed monthly releases from five to two over six months.",
+            "evidence_id": "EV-EXP-BULLET-003"
           },
           {
             "source_type": "experience",
@@ -35,7 +35,7 @@
       },
       {
         "status": "aligned",
-        "summary": "Internship experience at Copper Finch Systems supports additional overlap with Git, NumPy, ai, data, model, pandas.",
+        "summary": "Internship experience at Copper Finch Systems supports additional overlap with ai, data, model.",
         "citations": [
           {
             "source_type": "job_posting",
@@ -58,7 +58,7 @@
   "seniority": {
     "primary_finding": {
       "status": "aligned",
-      "summary": "No reliable explicit minimum is stated; candidate experience of 3 years aligns with the deterministic scoring experience component (100.0).",
+      "summary": "Candidate has 3 years of experience, meeting the posting minimum of 2 years (exact).",
       "citations": [
         {
           "source_type": "candidate_profile",
@@ -71,14 +71,7 @@
           "source_type": "job_posting",
           "source_id": "job_posting",
           "source_field": "experience_requirement_raw",
-          "supported_claim": "5+ years across the software development lifecycle and 1+ year with generative AI or LLM solutions",
-          "evidence_id": null
-        },
-        {
-          "source_type": "job_posting",
-          "source_id": "job_posting",
-          "source_field": "title",
-          "supported_claim": "AI Engineer",
+          "supported_claim": "2+ years in customer-facing machine learning or agentic AI work; internships may count",
           "evidence_id": null
         }
       ]
@@ -94,7 +87,7 @@
             "source_type": "job_posting",
             "source_id": "job_posting",
             "source_field": "job_description",
-            "supported_claim": "engineering",
+            "supported_claim": "degree, engineering",
             "evidence_id": null
           },
           {
@@ -110,56 +103,28 @@
   },
   "core_skills": {
     "aligned_skills": [
-      "Python",
-      "REST APIs",
-      "prompt engineering",
       "RAG",
-      "vector databases",
-      "pandas",
-      "NumPy",
-      "scikit-learn",
-      "Docker",
-      "Git",
-      "CI/CD"
+      "AWS",
+      "evaluation",
+      "monitoring",
+      "MLOps"
     ],
     "evidenced_elsewhere_skills": [],
     "genuine_gaps": [
-      "JavaScript",
-      "OpenAI",
-      "AWS Bedrock",
-      "LangGraph",
-      "Agno",
-      "CrewAI",
-      "cloud",
-      "observability",
-      "guardrails"
+      "LLMs",
+      "multi-agent orchestration",
+      "GCP",
+      "model lifecycle",
+      "security",
+      "customer-facing AI",
+      "prototyping",
+      "governance"
     ],
     "findings": [
       {
         "status": "aligned",
-        "summary": "Aligned skills currently visible on the resume: Python, REST APIs, prompt engineering, RAG, vector databases, pandas, NumPy, scikit-learn, Docker, Git, CI/CD.",
+        "summary": "Aligned skills currently visible on the resume: RAG, AWS, evaluation, monitoring, MLOps.",
         "citations": [
-          {
-            "source_type": "job_posting",
-            "source_id": "job_posting",
-            "source_field": "required_skills.Python",
-            "supported_claim": "Python",
-            "evidence_id": null
-          },
-          {
-            "source_type": "job_posting",
-            "source_id": "job_posting",
-            "source_field": "required_skills.REST APIs",
-            "supported_claim": "REST APIs",
-            "evidence_id": null
-          },
-          {
-            "source_type": "job_posting",
-            "source_id": "job_posting",
-            "source_field": "required_skills.prompt engineering",
-            "supported_claim": "prompt engineering",
-            "evidence_id": null
-          },
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
@@ -170,8 +135,29 @@
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
-            "source_field": "required_skills.vector databases",
-            "supported_claim": "vector databases",
+            "source_field": "required_skills.AWS",
+            "supported_claim": "AWS",
+            "evidence_id": null
+          },
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.evaluation",
+            "supported_claim": "evaluation",
+            "evidence_id": null
+          },
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.monitoring",
+            "supported_claim": "monitoring",
+            "evidence_id": null
+          },
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.MLOps",
+            "supported_claim": "MLOps",
             "evidence_id": null
           },
           {
@@ -185,117 +171,104 @@
       },
       {
         "status": "genuine_gap",
-        "summary": "JavaScript is required by the posting and has no supported candidate evidence.",
+        "summary": "LLMs is required by the posting and has no supported candidate evidence.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
-            "source_field": "required_skills.JavaScript",
-            "supported_claim": "JavaScript",
+            "source_field": "required_skills.LLMs",
+            "supported_claim": "LLMs",
             "evidence_id": null
           }
         ]
       },
       {
         "status": "genuine_gap",
-        "summary": "OpenAI is required by the posting and has no supported candidate evidence.",
+        "summary": "multi-agent orchestration is required by the posting and has no supported candidate evidence.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
-            "source_field": "required_skills.OpenAI",
-            "supported_claim": "OpenAI",
+            "source_field": "required_skills.multi-agent orchestration",
+            "supported_claim": "multi-agent orchestration",
             "evidence_id": null
           }
         ]
       },
       {
         "status": "genuine_gap",
-        "summary": "AWS Bedrock is required by the posting and has no supported candidate evidence.",
+        "summary": "GCP is required by the posting and has no supported candidate evidence.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
-            "source_field": "required_skills.AWS Bedrock",
-            "supported_claim": "AWS Bedrock",
+            "source_field": "required_skills.GCP",
+            "supported_claim": "GCP",
             "evidence_id": null
           }
         ]
       },
       {
         "status": "genuine_gap",
-        "summary": "LangGraph is required by the posting and has no supported candidate evidence.",
+        "summary": "model lifecycle is required by the posting and has no supported candidate evidence.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
-            "source_field": "required_skills.LangGraph",
-            "supported_claim": "LangGraph",
+            "source_field": "required_skills.model lifecycle",
+            "supported_claim": "model lifecycle",
             "evidence_id": null
           }
         ]
       },
       {
         "status": "genuine_gap",
-        "summary": "Agno is required by the posting and has no supported candidate evidence.",
+        "summary": "security is required by the posting and has no supported candidate evidence.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
-            "source_field": "required_skills.Agno",
-            "supported_claim": "Agno",
+            "source_field": "required_skills.security",
+            "supported_claim": "security",
             "evidence_id": null
           }
         ]
       },
       {
         "status": "genuine_gap",
-        "summary": "CrewAI is required by the posting and has no supported candidate evidence.",
+        "summary": "customer-facing AI is required by the posting and has no supported candidate evidence.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
-            "source_field": "required_skills.CrewAI",
-            "supported_claim": "CrewAI",
+            "source_field": "required_skills.customer-facing AI",
+            "supported_claim": "customer-facing AI",
             "evidence_id": null
           }
         ]
       },
       {
         "status": "genuine_gap",
-        "summary": "cloud is required by the posting and has no supported candidate evidence.",
+        "summary": "prototyping is required by the posting and has no supported candidate evidence.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
-            "source_field": "required_skills.cloud",
-            "supported_claim": "cloud",
+            "source_field": "required_skills.prototyping",
+            "supported_claim": "prototyping",
             "evidence_id": null
           }
         ]
       },
       {
         "status": "genuine_gap",
-        "summary": "observability is required by the posting and has no supported candidate evidence.",
+        "summary": "governance is required by the posting and has no supported candidate evidence.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
-            "source_field": "required_skills.observability",
-            "supported_claim": "observability",
-            "evidence_id": null
-          }
-        ]
-      },
-      {
-        "status": "genuine_gap",
-        "summary": "guardrails is required by the posting and has no supported candidate evidence.",
-        "citations": [
-          {
-            "source_type": "job_posting",
-            "source_id": "job_posting",
-            "source_field": "required_skills.guardrails",
-            "supported_claim": "guardrails",
+            "source_field": "required_skills.governance",
+            "supported_claim": "governance",
             "evidence_id": null
           }
         ]
@@ -308,8 +281,8 @@
         "project_id": "proj-retail-demand",
         "project_name": "ShelfSense Demand Forecaster",
         "on_base_resume": true,
-        "internal_score": 12.0,
-        "required_skill_overlap_count": 4,
+        "internal_score": 0.0,
+        "required_skill_overlap_count": 0,
         "domain_aligned": false,
         "industry_aligned": false
       },
@@ -317,8 +290,8 @@
         "project_id": "proj-model-watch",
         "project_name": "ModelWatch Release Guard",
         "on_base_resume": true,
-        "internal_score": 18.0,
-        "required_skill_overlap_count": 4,
+        "internal_score": 15.23,
+        "required_skill_overlap_count": 2,
         "domain_aligned": false,
         "industry_aligned": false
       },
@@ -326,8 +299,8 @@
         "project_id": "proj-grid-forecast",
         "project_name": "GridPulse Load Forecaster",
         "on_base_resume": true,
-        "internal_score": 12.0,
-        "required_skill_overlap_count": 4,
+        "internal_score": 0.0,
+        "required_skill_overlap_count": 0,
         "domain_aligned": false,
         "industry_aligned": false
       }
@@ -337,8 +310,8 @@
         "project_id": "proj-carepath-rag",
         "project_name": "CarePath Evidence Navigator",
         "on_base_resume": false,
-        "internal_score": 18.0,
-        "required_skill_overlap_count": 6,
+        "internal_score": 4.62,
+        "required_skill_overlap_count": 1,
         "domain_aligned": false,
         "industry_aligned": false
       },
@@ -346,8 +319,8 @@
         "project_id": "proj-vision-inspect",
         "project_name": "ForgeSight Defect Inspector",
         "on_base_resume": false,
-        "internal_score": 9.0,
-        "required_skill_overlap_count": 2,
+        "internal_score": 3.0,
+        "required_skill_overlap_count": 0,
         "domain_aligned": false,
         "industry_aligned": false
       },
@@ -355,8 +328,8 @@
         "project_id": "proj-ledger-anomaly",
         "project_name": "LedgerLens Anomaly Triage",
         "on_base_resume": false,
-        "internal_score": 15.0,
-        "required_skill_overlap_count": 4,
+        "internal_score": 3.0,
+        "required_skill_overlap_count": 0,
         "domain_aligned": false,
         "industry_aligned": false
       },
@@ -364,8 +337,8 @@
         "project_id": "proj-catalog-recs",
         "project_name": "CatalogCompass Recommender",
         "on_base_resume": false,
-        "internal_score": 15.0,
-        "required_skill_overlap_count": 4,
+        "internal_score": 3.0,
+        "required_skill_overlap_count": 0,
         "domain_aligned": false,
         "industry_aligned": false
       },
@@ -373,8 +346,8 @@
         "project_id": "proj-support-nlp",
         "project_name": "SupportSignal Intent Router",
         "on_base_resume": false,
-        "internal_score": 9.0,
-        "required_skill_overlap_count": 3,
+        "internal_score": 0.0,
+        "required_skill_overlap_count": 0,
         "domain_aligned": false,
         "industry_aligned": false
       }
@@ -385,13 +358,13 @@
     "findings": [
       {
         "status": "improvement_needed",
-        "summary": "Current resume project GridPulse Load Forecaster has the lowest internal fit score (12.0) for this posting.",
+        "summary": "Current resume project GridPulse Load Forecaster has the lowest internal fit score (0.0) for this posting.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
             "source_field": "required_skills",
-            "supported_claim": "Python; JavaScript; REST APIs; OpenAI; AWS Bedrock; prompt engineering; LangGraph; Agno; CrewAI; RAG; vector databases; pandas; NumPy; scikit-learn; Docker; cloud; Git; CI/CD; observability; guardrails",
+            "supported_claim": "LLMs; RAG; multi-agent orchestration; GCP; AWS; model lifecycle; evaluation; monitoring; security; MLOps; customer-facing AI; prototyping; governance",
             "evidence_id": null
           },
           {
@@ -405,13 +378,13 @@
       },
       {
         "status": "aligned",
-        "summary": "Current resume project ModelWatch Release Guard is the strongest project match (18.0) for this posting.",
+        "summary": "Current resume project ModelWatch Release Guard is the strongest project match (15.23) for this posting.",
         "citations": [
           {
             "source_type": "job_posting",
             "source_id": "job_posting",
             "source_field": "industry_domain",
-            "supported_claim": "Federal Government Technology / Agentic AI",
+            "supported_claim": "Financial Technology / Agentic AI for Accounting",
             "evidence_id": null
           },
           {
@@ -431,7 +404,7 @@
             "source_type": "job_posting",
             "source_id": "job_posting",
             "source_field": "required_skills",
-            "supported_claim": "Python; JavaScript; REST APIs; OpenAI; AWS Bedrock; prompt engineering; LangGraph; Agno; CrewAI; RAG; vector databases; pandas; NumPy; scikit-learn; Docker; cloud; Git; CI/CD; observability; guardrails",
+            "supported_claim": "LLMs; RAG; multi-agent orchestration; GCP; AWS; model lifecycle; evaluation; monitoring; security; MLOps; customer-facing AI; prototyping; governance",
             "evidence_id": null
           },
           {
@@ -448,126 +421,112 @@
   "tailoring_actions": [
     {
       "action_type": "preserve_genuine_gap",
-      "summary": "Do not add JavaScript; it remains a genuine gap with no candidate evidence.",
-      "target_id": "JavaScript",
+      "summary": "Do not add LLMs; it remains a genuine gap with no candidate evidence.",
+      "target_id": "LLMs",
       "citations": [
         {
           "source_type": "job_posting",
           "source_id": "job_posting",
-          "source_field": "required_skills.JavaScript",
-          "supported_claim": "JavaScript",
+          "source_field": "required_skills.LLMs",
+          "supported_claim": "LLMs",
           "evidence_id": null
         }
       ]
     },
     {
       "action_type": "preserve_genuine_gap",
-      "summary": "Do not add OpenAI; it remains a genuine gap with no candidate evidence.",
-      "target_id": "OpenAI",
+      "summary": "Do not add multi-agent orchestration; it remains a genuine gap with no candidate evidence.",
+      "target_id": "multi-agent orchestration",
       "citations": [
         {
           "source_type": "job_posting",
           "source_id": "job_posting",
-          "source_field": "required_skills.OpenAI",
-          "supported_claim": "OpenAI",
+          "source_field": "required_skills.multi-agent orchestration",
+          "supported_claim": "multi-agent orchestration",
           "evidence_id": null
         }
       ]
     },
     {
       "action_type": "preserve_genuine_gap",
-      "summary": "Do not add AWS Bedrock; it remains a genuine gap with no candidate evidence.",
-      "target_id": "AWS Bedrock",
+      "summary": "Do not add GCP; it remains a genuine gap with no candidate evidence.",
+      "target_id": "GCP",
       "citations": [
         {
           "source_type": "job_posting",
           "source_id": "job_posting",
-          "source_field": "required_skills.AWS Bedrock",
-          "supported_claim": "AWS Bedrock",
+          "source_field": "required_skills.GCP",
+          "supported_claim": "GCP",
           "evidence_id": null
         }
       ]
     },
     {
       "action_type": "preserve_genuine_gap",
-      "summary": "Do not add LangGraph; it remains a genuine gap with no candidate evidence.",
-      "target_id": "LangGraph",
+      "summary": "Do not add model lifecycle; it remains a genuine gap with no candidate evidence.",
+      "target_id": "model lifecycle",
       "citations": [
         {
           "source_type": "job_posting",
           "source_id": "job_posting",
-          "source_field": "required_skills.LangGraph",
-          "supported_claim": "LangGraph",
+          "source_field": "required_skills.model lifecycle",
+          "supported_claim": "model lifecycle",
           "evidence_id": null
         }
       ]
     },
     {
       "action_type": "preserve_genuine_gap",
-      "summary": "Do not add Agno; it remains a genuine gap with no candidate evidence.",
-      "target_id": "Agno",
+      "summary": "Do not add security; it remains a genuine gap with no candidate evidence.",
+      "target_id": "security",
       "citations": [
         {
           "source_type": "job_posting",
           "source_id": "job_posting",
-          "source_field": "required_skills.Agno",
-          "supported_claim": "Agno",
+          "source_field": "required_skills.security",
+          "supported_claim": "security",
           "evidence_id": null
         }
       ]
     },
     {
       "action_type": "preserve_genuine_gap",
-      "summary": "Do not add CrewAI; it remains a genuine gap with no candidate evidence.",
-      "target_id": "CrewAI",
+      "summary": "Do not add customer-facing AI; it remains a genuine gap with no candidate evidence.",
+      "target_id": "customer-facing AI",
       "citations": [
         {
           "source_type": "job_posting",
           "source_id": "job_posting",
-          "source_field": "required_skills.CrewAI",
-          "supported_claim": "CrewAI",
+          "source_field": "required_skills.customer-facing AI",
+          "supported_claim": "customer-facing AI",
           "evidence_id": null
         }
       ]
     },
     {
       "action_type": "preserve_genuine_gap",
-      "summary": "Do not add cloud; it remains a genuine gap with no candidate evidence.",
-      "target_id": "cloud",
+      "summary": "Do not add prototyping; it remains a genuine gap with no candidate evidence.",
+      "target_id": "prototyping",
       "citations": [
         {
           "source_type": "job_posting",
           "source_id": "job_posting",
-          "source_field": "required_skills.cloud",
-          "supported_claim": "cloud",
+          "source_field": "required_skills.prototyping",
+          "supported_claim": "prototyping",
           "evidence_id": null
         }
       ]
     },
     {
       "action_type": "preserve_genuine_gap",
-      "summary": "Do not add observability; it remains a genuine gap with no candidate evidence.",
-      "target_id": "observability",
+      "summary": "Do not add governance; it remains a genuine gap with no candidate evidence.",
+      "target_id": "governance",
       "citations": [
         {
           "source_type": "job_posting",
           "source_id": "job_posting",
-          "source_field": "required_skills.observability",
-          "supported_claim": "observability",
-          "evidence_id": null
-        }
-      ]
-    },
-    {
-      "action_type": "preserve_genuine_gap",
-      "summary": "Do not add guardrails; it remains a genuine gap with no candidate evidence.",
-      "target_id": "guardrails",
-      "citations": [
-        {
-          "source_type": "job_posting",
-          "source_id": "job_posting",
-          "source_field": "required_skills.guardrails",
-          "supported_claim": "guardrails",
+          "source_field": "required_skills.governance",
+          "supported_claim": "governance",
           "evidence_id": null
         }
       ]
@@ -581,15 +540,15 @@
           "source_type": "job_posting",
           "source_id": "job_posting",
           "source_field": "required_skills",
-          "supported_claim": "Python; JavaScript; REST APIs; OpenAI; AWS Bedrock; prompt engineering; LangGraph; Agno; CrewAI; RAG; vector databases; pandas; NumPy; scikit-learn; Docker; cloud; Git; CI/CD; observability; guardrails",
+          "supported_claim": "LLMs; RAG; multi-agent orchestration; GCP; AWS; model lifecycle; evaluation; monitoring; security; MLOps; customer-facing AI; prototyping; governance",
           "evidence_id": null
         }
       ]
     }
   ],
-  "formatted_text": "Tell me why this job is a good fit for me.\n\nRelevant Experience\n✅ Primary experience bullet exp-primary-bullet-1 aligns with the posting through Python, ai, data, model, python, scikit-learn. [job_posting] [EV-EXP-BULLET-001] [EV-EXP-001]\n✅ Internship experience at Copper Finch Systems supports additional overlap with Git, NumPy, ai, data, model, pandas. [job_posting] [EV-EXP-002]\n\nSeniority\n✅ No reliable explicit minimum is stated; candidate experience of 3 years aligns with the deterministic scoring experience component (100.0). [cand-mira-solenne-001] [job_posting] [job_posting]\n\nEducation\n✅ Candidate education M.S. in Applied Data Science satisfies explicit posting education keywords. [job_posting] [EV-EDU-001]\n\nCore Skills\n✅ Aligned: Python, REST APIs, prompt engineering, RAG, vector databases, pandas, NumPy, scikit-learn, Docker, Git, CI/CD\n❌ Missing but evidenced in your profile: None\n❌ Genuine gaps: JavaScript, OpenAI, AWS Bedrock, LangGraph, Agno, CrewAI, cloud, observability, guardrails\n\nProjects\n❌ Current resume project GridPulse Load Forecaster has the lowest internal fit score (12.0) for this posting. [job_posting] [EV-PROJ-006]\n✅ Current resume project ModelWatch Release Guard is the strongest project match (18.0) for this posting. [job_posting] [EV-PROJ-003]\nℹ️ No valid project swap meets the threshold; the current base-resume projects are the best available evidence set for this role. [job_posting] [EV-PROJ-003]",
-  "evidence_citation_count": 28,
-  "genuine_gap_count": 9,
+  "formatted_text": "Tell me why this job is a good fit for me.\n\nRelevant Experience\n✅ Primary experience bullet exp-primary-bullet-3 aligns with the posting through AWS, ai, model. [job_posting] [EV-EXP-BULLET-003] [EV-EXP-001]\n✅ Internship experience at Copper Finch Systems supports additional overlap with ai, data, model. [job_posting] [EV-EXP-002]\n\nSeniority\n✅ Candidate has 3 years of experience, meeting the posting minimum of 2 years (exact). [cand-mira-solenne-001] [job_posting]\n\nEducation\n✅ Candidate education M.S. in Applied Data Science satisfies explicit posting education keywords. [job_posting] [EV-EDU-001]\n\nCore Skills\n✅ Aligned: RAG, AWS, evaluation, monitoring, MLOps\n❌ Missing but evidenced in your profile: None\n❌ Genuine gaps: LLMs, multi-agent orchestration, GCP, model lifecycle, security, customer-facing AI, prototyping, governance\n\nProjects\n❌ Current resume project GridPulse Load Forecaster has the lowest internal fit score (0.0) for this posting. [job_posting] [EV-PROJ-006]\n✅ Current resume project ModelWatch Release Guard is the strongest project match (15.23) for this posting. [job_posting] [EV-PROJ-003]\nℹ️ No valid project swap meets the threshold; the current base-resume projects are the best available evidence set for this role. [job_posting] [EV-PROJ-003]",
+  "evidence_citation_count": 26,
+  "genuine_gap_count": 8,
   "evidenced_missing_skill_count": 0,
   "project_swap_recommended": false
 }

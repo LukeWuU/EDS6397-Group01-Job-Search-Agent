@@ -9,15 +9,15 @@
       "normalized_value": "Cross-functional collaboration with product and engineering teams",
       "skill_tags": [],
       "evidence_refs": [
-        "5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2"
+        "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b"
       ],
       "provenance": {
         "source": "candidate_review",
         "review_round": 1,
-        "run_id": "human-review:r1:5eee0550d17af6b33e32c8f7c65f5e8f39052b0cab9b5e6de74fc9f4ba97cdd2",
+        "run_id": "human-review:r1:0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
         "reviewer_role": "candidate"
       },
-      "created_at": "2026-07-19T03:35:39.395983Z",
+      "created_at": "2026-07-21T18:02:41.151054Z",
       "applied_in_run": true
     }
   ]

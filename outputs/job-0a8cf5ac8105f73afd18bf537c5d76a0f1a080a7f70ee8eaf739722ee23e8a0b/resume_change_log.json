@@ -2,8 +2,8 @@
   "job_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
   "title": "AI Engineer | Camden Corporate Office (Remote Position)",
   "company": "Camden Property Trust",
-  "revision_round": 1,
-  "review_feedback": "Revise the professional summary to emphasize the newly remembered cross-functional collaboration with product and engineering teams. Keep exactly two evidence-grounded experience bullet revisions, preserve the CarePath-for-GridPulse project swap, and keep the PDF to one page.",
+  "revision_round": 0,
+  "review_feedback": null,
   "edit_categories": [
     "professional_summary",
     "experience_bullet",
@@ -14,8 +14,8 @@
       "category": "professional_summary",
       "target_id": "summary",
       "before": "Machine learning engineer with three years of experience building evaluated\nML models, retrieval-augmented APIs, and monitored AWS deployments. M.S. in\nApplied Data Science with strengths across Python, PyTorch, and MLOps.",
-      "after": "AI engineer with expertise in Python, vector databases, and prompt engineering. Proven ability to collaborate cross-functionally with product and engineering teams to deliver scalable AI solutions.",
-      "reason": "Highlights required role phrase and cross-functional collaboration from current memory.",
+      "after": "AI engineer with Python, REST APIs, vector databases, prompt engineering, RAG, and MLOps expertise.",
+      "reason": "Aligns with required role phrase and demonstrated skills.",
       "citations": [
         {
           "source_type": "job_posting",
@@ -38,7 +38,7 @@
       "target_id": "exp-primary-bullet-1",
       "before": "Built Python and scikit-learn risk models over SQL pipelines,\n      raising validated recall by 14\\% at a constant false-positive rate.",
       "after": "Built Python and scikit-learn risk models over SQL data pipelines, raising validated recall by 14% while holding the false-positive rate constant.",
-      "reason": "Supported by Python and metrics.",
+      "reason": "Supported by evidence and aligns with Python skill.",
       "citations": [
         {
           "source_type": "experience_bullet",
@@ -61,7 +61,7 @@
       "target_id": "exp-primary-bullet-2",
       "before": "Delivered a RAG knowledge API with FastAPI, embeddings, and\n      vector search, reducing median analyst lookup time by 36\\% in a pilot.",
       "after": "Delivered a retrieval-augmented knowledge API with FastAPI, embeddings, and vector search, reducing median analyst lookup time by 36% in a controlled pilot.",
-      "reason": "Supported by vector databases and metrics.",
+      "reason": "Supported by evidence and aligns with vector databases skill.",
       "citations": [
         {
           "source_type": "experience_bullet",
@@ -84,7 +84,7 @@
       "target_id": "proj-grid-forecast->proj-carepath-rag",
       "before": "  \\resumeEntry{GridPulse Load Forecaster}{2025}\n    {Python, pandas, NumPy, scikit-learn, MLflow}{Energy}\n  \\resumeItemListStart\n    \\resumeItem{Compared reproducible forecasting baselines and improved mean\n      absolute error by 12\\% over a seasonal-naive baseline across four windows.}\n  \\resumeItemListEnd",
       "after": "  \\resumeEntry{CarePath Evidence Navigator}{2025}\n    {Python, FastAPI, PostgreSQL, Embeddings, Vector Search, Docker}{Healthcare}\n  \\resumeItemListStart\n    \\resumeItem{Retrieved a reviewer-approved supporting passage in the top three results for 87\\% of 120 synthetic evaluation questions.}\n  \\resumeItemListEnd",
-      "reason": "Replaced GridPulse Load Forecaster with CarePath Evidence Navigator to improve required-skill and domain alignment for this posting.",
+      "reason": "Replacing GridPulse Load Forecaster with CarePath Evidence Navigator improves required-skill and domain alignment for this posting.",
       "citations": [
         {
           "source_type": "job_posting",
@@ -122,29 +122,29 @@
   "experience_bullet_change_count": 2,
   "skill_change_count": 0,
   "project_swap_change_count": 1,
-  "base_resume_pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_before.pdf",
-  "draft_tex_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_draft_r1.tex",
-  "draft_pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_draft_r1.pdf",
-  "change_log_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\change_log_r1.json",
+  "base_resume_pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_before.pdf",
+  "draft_tex_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_draft_r0.tex",
+  "draft_pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_draft_r0.pdf",
+  "change_log_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\change_log_r0.json",
   "compilation": {
     "command": [
       "pdflatex",
       "-interaction=nonstopmode",
       "-halt-on-error",
-      "resume_draft_r1.tex"
+      "resume_draft_r0.tex"
     ],
     "return_code": 0,
-    "pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\outputs\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_draft_r1.pdf",
+    "pdf_path": "C:\\Users\\17982\\Desktop\\EDS 6397\\Group 1\\EDS6397-Group01-Job-Search-Agent\\.clean-rerun-2\\outputs\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_draft_r0.pdf",
     "page_count": 1,
-    "stdout_tail": "ers\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\hyperref.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/iftex\\iftex.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/graphics\\keyval.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/kvsetkeys\\kvsetkeys.sty\n)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/kvdefinekeys\\kvdefine\nkeys.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/pdfescape\\pdfescape.s\nty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/ltxcmds\\ltxcmds.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/pdftexcmds\\pdftexcmds\n.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/infwarerr\\infwarerr.s\nty)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hycolor\\hycolor.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\nameref.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/refcount\\refcount.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/gettitlestring\\gettit\nlestring.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/kvoptions\\kvoptions.sty\n)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/etoolbox\\etoolbox.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/stringenc\\stringenc.s\nty) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\pd1enc.def\n) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/intcalc\\intcalc.sty\n) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\puenc.def)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/url\\url.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/bitset\\bitset.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/bigintcalc\\bigintcalc\n.sty)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\hpdftex.def\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/rerunfilecheck\\rerunfil\necheck.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/uniquecounter\\uniquec\nounter.sty)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel\\babel.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel\\txtbabel.def)\n*************************************\n* Local config file bblopts.cfg used\n*\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/arabi\\bblopts.cfg)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel/locale/en\\babel\n-english.tex)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/babel-english\\english.l\ndf)) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/tools\\tabularx.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/tools\\array.sty))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/l3backend\\l3backend-pdf\ntex.def)\nNo file resume_draft_r1.aux.\n\nLaTeX Font Warning: Font shape `OT1/cmr/bx/sc' undefined\n(Font)              using `OT1/cmr/bx/n' instead on input line 59.\n\n[1{C:/Users/17982/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]\n(resume_draft_r1.aux)\n\nLaTeX Font Warning: Some font shapes were not available, defaults substituted.\n\n\nPackage rerunfilecheck Warning: File `resume_draft_r1.out' has changed.\n(rerunfilecheck)                Rerun to get outlines right\n(rerunfilecheck)                or use package `bookmark'.\n\n ) <C:\\Users\\17982\\AppData\\Local\\MiKTeX\\fonts/pk/ljfour/jknappen/ec/dpi600\\tcrm\n1000.pk><C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfon\nts/cm/cmbx10.pfb><C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/type1/publ\nic/amsfonts/cm/cmbx12.pfb><C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/t\nype1/public/amsfonts/cm/cmcsc10.pfb><C:/Users/17982/AppData/Local/Programs/MiKT\neX/fonts/type1/public/amsfonts/cm/cmr10.pfb><C:/Users/17982/AppData/Local/Progr\nams/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy10.pfb><C:/Users/17982/AppData/Lo\ncal/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmti10.pfb>\nOutput written on resume_draft_r1.pdf (1 page, 101825 bytes).\nTranscript written on resume_draft_r1.log.\n",
+    "stdout_tail": "ers\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\hyperref.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/iftex\\iftex.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/graphics\\keyval.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/kvsetkeys\\kvsetkeys.sty\n)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/kvdefinekeys\\kvdefine\nkeys.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/pdfescape\\pdfescape.s\nty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/ltxcmds\\ltxcmds.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/pdftexcmds\\pdftexcmds\n.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/infwarerr\\infwarerr.s\nty)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hycolor\\hycolor.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\nameref.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/refcount\\refcount.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/gettitlestring\\gettit\nlestring.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/kvoptions\\kvoptions.sty\n)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/etoolbox\\etoolbox.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/stringenc\\stringenc.s\nty) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\pd1enc.def\n) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/intcalc\\intcalc.sty\n) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\puenc.def)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/url\\url.sty)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/bitset\\bitset.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/bigintcalc\\bigintcalc\n.sty)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\hpdftex.def\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/rerunfilecheck\\rerunfil\necheck.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/uniquecounter\\uniquec\nounter.sty)))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel\\babel.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel\\txtbabel.def)\n*************************************\n* Local config file bblopts.cfg used\n*\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/arabi\\bblopts.cfg)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel/locale/en\\babel\n-english.tex)\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/babel-english\\english.l\ndf)) (C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/tools\\tabularx.sty\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/tools\\array.sty))\n(C:\\Users\\17982\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/l3backend\\l3backend-pdf\ntex.def)\nNo file resume_draft_r0.aux.\n\nLaTeX Font Warning: Font shape `OT1/cmr/bx/sc' undefined\n(Font)              using `OT1/cmr/bx/n' instead on input line 59.\n\n[1{C:/Users/17982/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]\n(resume_draft_r0.aux)\n\nLaTeX Font Warning: Some font shapes were not available, defaults substituted.\n\n\nPackage rerunfilecheck Warning: File `resume_draft_r0.out' has changed.\n(rerunfilecheck)                Rerun to get outlines right\n(rerunfilecheck)                or use package `bookmark'.\n\n ) <C:\\Users\\17982\\AppData\\Local\\MiKTeX\\fonts/pk/ljfour/jknappen/ec/dpi600\\tcrm\n1000.pk><C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfon\nts/cm/cmbx10.pfb><C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/type1/publ\nic/amsfonts/cm/cmbx12.pfb><C:/Users/17982/AppData/Local/Programs/MiKTeX/fonts/t\nype1/public/amsfonts/cm/cmcsc10.pfb><C:/Users/17982/AppData/Local/Programs/MiKT\neX/fonts/type1/public/amsfonts/cm/cmr10.pfb><C:/Users/17982/AppData/Local/Progr\nams/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy10.pfb><C:/Users/17982/AppData/Lo\ncal/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmti10.pfb>\nOutput written on resume_draft_r0.pdf (1 page, 101759 bytes).\nTranscript written on resume_draft_r0.log.\n",
     "stderr_tail": "pdflatex: major issue: So far, you have not checked for MiKTeX updates.\n"
   },
   "page_count": 1,
   "evidence_citation_count": 10,
   "base_tex_sha256": "91aac1069fe3d62e6170bea396a99858fd0b06bee9a96314a5bcd621e2c20418",
-  "tailored_tex_sha256": "6e151474c59dbaf1fe385d27b522c55d4a3ab3c3e85aa36e47ed2c2bcb39b59c",
+  "tailored_tex_sha256": "967fd0575ed30f8d25f85459cd32836a559a819786eb18e41fa89b7d0c88c7fd",
   "protected_regions_sha256_before": "c104f5871a7baa722e5e2c3c72b2352b3d76bb79bb8ca6c62f3e35f06ed348f9",
   "protected_regions_sha256_after": "c104f5871a7baa722e5e2c3c72b2352b3d76bb79bb8ca6c62f3e35f06ed348f9",
   "protected_regions_unchanged": true,
-  "deterministic_plan_digest": "6559e342db9d7eaa2966fc9504b53654860c3e13a10c49fe78ccbae64c73d1e5"
+  "deterministic_plan_digest": "64d6640802303245e8818cc69145cdbe190edc157c75c52d386a9a9a8dc36c8d"
 }
