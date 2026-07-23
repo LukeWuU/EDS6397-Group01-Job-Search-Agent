@@ -20,3 +20,4 @@ htmlcov/
 Thumbs.db
 
 .cursor/
+outputs_rob_test/.runtime/
