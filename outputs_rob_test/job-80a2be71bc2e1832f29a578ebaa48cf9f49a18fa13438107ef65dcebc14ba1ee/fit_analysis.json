@@ -1,0 +1,610 @@
+{
+  "job_id": "80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee",
+  "title": "AI Engineer",
+  "company": "Flash AI",
+  "score_rank": 2,
+  "final_score": 69.0,
+  "relevant_experience": {
+    "findings": [
+      {
+        "status": "aligned",
+        "summary": "Primary experience bullet exp-primary-bullet-1 aligns with the posting through Python, ai, data, data pipelines, model, python.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills",
+            "supported_claim": "Posting requires skills including Python, ai, data, data pipelines, model, python.",
+            "evidence_id": null
+          },
+          {
+            "source_type": "experience_bullet",
+            "source_id": "exp-primary-bullet-1",
+            "source_field": "text",
+            "supported_claim": "Built Python and scikit-learn risk models over SQL data pipelines, raising validated recall by 14% while holding the false-positive rate constant.",
+            "evidence_id": "EV-EXP-BULLET-001"
+          },
+          {
+            "source_type": "experience",
+            "source_id": "exp-ml-engineer-001",
+            "source_field": "job_title",
+            "supported_claim": "Machine Learning Engineer at Northstar Lantern Analytics",
+            "evidence_id": "EV-EXP-001"
+          }
+        ]
+      },
+      {
+        "status": "aligned",
+        "summary": "Internship experience at Copper Finch Systems supports additional overlap with ai, data, model.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "job_description",
+            "supported_claim": "Posting references related ML and data responsibilities.",
+            "evidence_id": null
+          },
+          {
+            "source_type": "experience",
+            "source_id": "exp-data-science-intern-001",
+            "source_field": "employer",
+            "supported_claim": "Data Science Intern at Copper Finch Systems",
+            "evidence_id": "EV-EXP-002"
+          }
+        ]
+      }
+    ]
+  },
+  "seniority": {
+    "primary_finding": {
+      "status": "aligned",
+      "summary": "Candidate has 3 years of experience, meeting the posting minimum of 2 years (exact).",
+      "citations": [
+        {
+          "source_type": "candidate_profile",
+          "source_id": "cand-mira-solenne-001",
+          "source_field": "preferences.years_of_experience",
+          "supported_claim": "3",
+          "evidence_id": null
+        },
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "experience_requirement_raw",
+          "supported_claim": "2+ years of production machine learning or AI engineering experience",
+          "evidence_id": null
+        }
+      ]
+    }
+  },
+  "education": {
+    "findings": [
+      {
+        "status": "aligned",
+        "summary": "Candidate education M.S. in Applied Data Science satisfies explicit posting education keywords.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "job_description",
+            "supported_claim": "engineering",
+            "evidence_id": null
+          },
+          {
+            "source_type": "education",
+            "source_id": "edu-ms-001",
+            "source_field": "degree",
+            "supported_claim": "M.S. in Applied Data Science",
+            "evidence_id": "EV-EDU-001"
+          }
+        ]
+      }
+    ]
+  },
+  "core_skills": {
+    "aligned_skills": [
+      "Python",
+      "RAG",
+      "embeddings",
+      "vector search",
+      "vector databases",
+      "evaluation",
+      "NLP"
+    ],
+    "evidenced_elsewhere_skills": [],
+    "genuine_gaps": [
+      "production ML",
+      "LLMs",
+      "prompt design",
+      "chunking",
+      "AWS GovCloud",
+      "speech recognition",
+      "data pipelines"
+    ],
+    "findings": [
+      {
+        "status": "aligned",
+        "summary": "Aligned skills currently visible on the resume: Python, RAG, embeddings, vector search, vector databases, evaluation, NLP.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.Python",
+            "supported_claim": "Python",
+            "evidence_id": null
+          },
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.RAG",
+            "supported_claim": "RAG",
+            "evidence_id": null
+          },
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.embeddings",
+            "supported_claim": "embeddings",
+            "evidence_id": null
+          },
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.vector search",
+            "supported_claim": "vector search",
+            "evidence_id": null
+          },
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.vector databases",
+            "supported_claim": "vector databases",
+            "evidence_id": null
+          },
+          {
+            "source_type": "resume_tex",
+            "source_id": "sample_resume.tex",
+            "source_field": "Skills",
+            "supported_claim": "Skill appears in the current resume source.",
+            "evidence_id": null
+          }
+        ]
+      },
+      {
+        "status": "genuine_gap",
+        "summary": "production ML is required by the posting and has no supported candidate evidence.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.production ML",
+            "supported_claim": "production ML",
+            "evidence_id": null
+          }
+        ]
+      },
+      {
+        "status": "genuine_gap",
+        "summary": "LLMs is required by the posting and has no supported candidate evidence.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.LLMs",
+            "supported_claim": "LLMs",
+            "evidence_id": null
+          }
+        ]
+      },
+      {
+        "status": "genuine_gap",
+        "summary": "prompt design is required by the posting and has no supported candidate evidence.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.prompt design",
+            "supported_claim": "prompt design",
+            "evidence_id": null
+          }
+        ]
+      },
+      {
+        "status": "genuine_gap",
+        "summary": "chunking is required by the posting and has no supported candidate evidence.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.chunking",
+            "supported_claim": "chunking",
+            "evidence_id": null
+          }
+        ]
+      },
+      {
+        "status": "genuine_gap",
+        "summary": "AWS GovCloud is required by the posting and has no supported candidate evidence.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.AWS GovCloud",
+            "supported_claim": "AWS GovCloud",
+            "evidence_id": null
+          }
+        ]
+      },
+      {
+        "status": "genuine_gap",
+        "summary": "speech recognition is required by the posting and has no supported candidate evidence.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.speech recognition",
+            "supported_claim": "speech recognition",
+            "evidence_id": null
+          }
+        ]
+      },
+      {
+        "status": "genuine_gap",
+        "summary": "data pipelines is required by the posting and has no supported candidate evidence.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills.data pipelines",
+            "supported_claim": "data pipelines",
+            "evidence_id": null
+          }
+        ]
+      }
+    ]
+  },
+  "projects": {
+    "current_project_comparisons": [
+      {
+        "project_id": "proj-retail-demand",
+        "project_name": "ShelfSense Demand Forecaster",
+        "on_base_resume": true,
+        "internal_score": 4.29,
+        "required_skill_overlap_count": 1,
+        "domain_aligned": false,
+        "industry_aligned": false
+      },
+      {
+        "project_id": "proj-model-watch",
+        "project_name": "ModelWatch Release Guard",
+        "on_base_resume": true,
+        "internal_score": 10.29,
+        "required_skill_overlap_count": 1,
+        "domain_aligned": false,
+        "industry_aligned": false
+      },
+      {
+        "project_id": "proj-grid-forecast",
+        "project_name": "GridPulse Load Forecaster",
+        "on_base_resume": true,
+        "internal_score": 4.29,
+        "required_skill_overlap_count": 1,
+        "domain_aligned": false,
+        "industry_aligned": false
+      }
+    ],
+    "replacement_comparisons": [
+      {
+        "project_id": "proj-carepath-rag",
+        "project_name": "CarePath Evidence Navigator",
+        "on_base_resume": false,
+        "internal_score": 25.71,
+        "required_skill_overlap_count": 6,
+        "domain_aligned": false,
+        "industry_aligned": false
+      },
+      {
+        "project_id": "proj-vision-inspect",
+        "project_name": "ForgeSight Defect Inspector",
+        "on_base_resume": false,
+        "internal_score": 7.29,
+        "required_skill_overlap_count": 1,
+        "domain_aligned": false,
+        "industry_aligned": false
+      },
+      {
+        "project_id": "proj-ledger-anomaly",
+        "project_name": "LedgerLens Anomaly Triage",
+        "on_base_resume": false,
+        "internal_score": 7.29,
+        "required_skill_overlap_count": 1,
+        "domain_aligned": false,
+        "industry_aligned": false
+      },
+      {
+        "project_id": "proj-catalog-recs",
+        "project_name": "CatalogCompass Recommender",
+        "on_base_resume": false,
+        "internal_score": 7.29,
+        "required_skill_overlap_count": 1,
+        "domain_aligned": false,
+        "industry_aligned": false
+      },
+      {
+        "project_id": "proj-support-nlp",
+        "project_name": "SupportSignal Intent Router",
+        "on_base_resume": false,
+        "internal_score": 8.57,
+        "required_skill_overlap_count": 2,
+        "domain_aligned": false,
+        "industry_aligned": false
+      }
+    ],
+    "weakest_current_project_id": "proj-grid-forecast",
+    "strongest_current_project_id": "proj-model-watch",
+    "swap_suggestion": {
+      "remove_project_id": "proj-grid-forecast",
+      "remove_project_name": "GridPulse Load Forecaster",
+      "add_project_id": "proj-carepath-rag",
+      "add_project_name": "CarePath Evidence Navigator",
+      "current_project_score": 4.29,
+      "replacement_project_score": 25.71,
+      "score_improvement": 21.42,
+      "matched_technologies": [
+        "Python",
+        "Embeddings",
+        "Vector Search"
+      ],
+      "matched_skills": [
+        "Python",
+        "RAG",
+        "embeddings",
+        "vector search",
+        "vector databases",
+        "NLP"
+      ],
+      "domain_alignment": "Healthcare",
+      "industry_alignment": "Clinical Operations",
+      "reason": "Replace GridPulse Load Forecaster with CarePath Evidence Navigator to improve required-skill and domain alignment for this posting.",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "required_skills",
+          "supported_claim": "Python; production ML; LLMs; RAG; prompt design; chunking; embeddings; vector search; vector databases; evaluation; AWS GovCloud; speech recognition; NLP; data pipelines",
+          "evidence_id": null
+        },
+        {
+          "source_type": "portfolio_project",
+          "source_id": "proj-grid-forecast",
+          "source_field": "project_id",
+          "supported_claim": "GridPulse Load Forecaster",
+          "evidence_id": "EV-PROJ-006"
+        },
+        {
+          "source_type": "portfolio_project",
+          "source_id": "proj-carepath-rag",
+          "source_field": "project_id",
+          "supported_claim": "CarePath Evidence Navigator",
+          "evidence_id": "EV-PROJ-001"
+        }
+      ]
+    },
+    "findings": [
+      {
+        "status": "improvement_needed",
+        "summary": "Current resume project GridPulse Load Forecaster has the lowest internal fit score (4.29) for this posting.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills",
+            "supported_claim": "Python; production ML; LLMs; RAG; prompt design; chunking; embeddings; vector search; vector databases; evaluation; AWS GovCloud; speech recognition; NLP; data pipelines",
+            "evidence_id": null
+          },
+          {
+            "source_type": "portfolio_project",
+            "source_id": "proj-grid-forecast",
+            "source_field": "skills_demonstrated",
+            "supported_claim": "A short-horizon load forecasting study using public weather and power-demand series.",
+            "evidence_id": "EV-PROJ-006"
+          }
+        ]
+      },
+      {
+        "status": "aligned",
+        "summary": "Current resume project ModelWatch Release Guard is the strongest project match (10.29) for this posting.",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "industry_domain",
+            "supported_claim": "Public Safety / Investigative AI Software",
+            "evidence_id": null
+          },
+          {
+            "source_type": "portfolio_project",
+            "source_id": "proj-model-watch",
+            "source_field": "domain",
+            "supported_claim": "Developer Productivity / Machine Learning Operations",
+            "evidence_id": "EV-PROJ-003"
+          }
+        ]
+      },
+      {
+        "status": "improvement_needed",
+        "summary": "Swap suggestion: replace GridPulse Load Forecaster with CarePath Evidence Navigator (+21.42 internal fit points).",
+        "citations": [
+          {
+            "source_type": "job_posting",
+            "source_id": "job_posting",
+            "source_field": "required_skills",
+            "supported_claim": "Python; production ML; LLMs; RAG; prompt design; chunking; embeddings; vector search; vector databases; evaluation; AWS GovCloud; speech recognition; NLP; data pipelines",
+            "evidence_id": null
+          },
+          {
+            "source_type": "portfolio_project",
+            "source_id": "proj-grid-forecast",
+            "source_field": "project_id",
+            "supported_claim": "GridPulse Load Forecaster",
+            "evidence_id": "EV-PROJ-006"
+          },
+          {
+            "source_type": "portfolio_project",
+            "source_id": "proj-carepath-rag",
+            "source_field": "project_id",
+            "supported_claim": "CarePath Evidence Navigator",
+            "evidence_id": "EV-PROJ-001"
+          }
+        ]
+      }
+    ]
+  },
+  "tailoring_actions": [
+    {
+      "action_type": "rewrite_summary_to_emphasize_fit",
+      "summary": "Rewrite the professional summary to emphasize the strongest evidenced fit areas.",
+      "target_id": null,
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "title",
+          "supported_claim": "AI Engineer",
+          "evidence_id": null
+        }
+      ]
+    },
+    {
+      "action_type": "preserve_genuine_gap",
+      "summary": "Do not add production ML; it remains a genuine gap with no candidate evidence.",
+      "target_id": "production ML",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "required_skills.production ML",
+          "supported_claim": "production ML",
+          "evidence_id": null
+        }
+      ]
+    },
+    {
+      "action_type": "preserve_genuine_gap",
+      "summary": "Do not add LLMs; it remains a genuine gap with no candidate evidence.",
+      "target_id": "LLMs",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "required_skills.LLMs",
+          "supported_claim": "LLMs",
+          "evidence_id": null
+        }
+      ]
+    },
+    {
+      "action_type": "preserve_genuine_gap",
+      "summary": "Do not add prompt design; it remains a genuine gap with no candidate evidence.",
+      "target_id": "prompt design",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "required_skills.prompt design",
+          "supported_claim": "prompt design",
+          "evidence_id": null
+        }
+      ]
+    },
+    {
+      "action_type": "preserve_genuine_gap",
+      "summary": "Do not add chunking; it remains a genuine gap with no candidate evidence.",
+      "target_id": "chunking",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "required_skills.chunking",
+          "supported_claim": "chunking",
+          "evidence_id": null
+        }
+      ]
+    },
+    {
+      "action_type": "preserve_genuine_gap",
+      "summary": "Do not add AWS GovCloud; it remains a genuine gap with no candidate evidence.",
+      "target_id": "AWS GovCloud",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "required_skills.AWS GovCloud",
+          "supported_claim": "AWS GovCloud",
+          "evidence_id": null
+        }
+      ]
+    },
+    {
+      "action_type": "preserve_genuine_gap",
+      "summary": "Do not add speech recognition; it remains a genuine gap with no candidate evidence.",
+      "target_id": "speech recognition",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "required_skills.speech recognition",
+          "supported_claim": "speech recognition",
+          "evidence_id": null
+        }
+      ]
+    },
+    {
+      "action_type": "preserve_genuine_gap",
+      "summary": "Do not add data pipelines; it remains a genuine gap with no candidate evidence.",
+      "target_id": "data pipelines",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "required_skills.data pipelines",
+          "supported_claim": "data pipelines",
+          "evidence_id": null
+        }
+      ]
+    },
+    {
+      "action_type": "swap_project",
+      "summary": "Swap GridPulse Load Forecaster (proj-grid-forecast) for CarePath Evidence Navigator (proj-carepath-rag).",
+      "target_id": "proj-carepath-rag",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "job_posting",
+          "source_field": "required_skills",
+          "supported_claim": "Python; production ML; LLMs; RAG; prompt design; chunking; embeddings; vector search; vector databases; evaluation; AWS GovCloud; speech recognition; NLP; data pipelines",
+          "evidence_id": null
+        },
+        {
+          "source_type": "portfolio_project",
+          "source_id": "proj-grid-forecast",
+          "source_field": "project_id",
+          "supported_claim": "GridPulse Load Forecaster",
+          "evidence_id": "EV-PROJ-006"
+        },
+        {
+          "source_type": "portfolio_project",
+          "source_id": "proj-carepath-rag",
+          "source_field": "project_id",
+          "supported_claim": "CarePath Evidence Navigator",
+          "evidence_id": "EV-PROJ-001"
+        }
+      ]
+    }
+  ],
+  "formatted_text": "Tell me why this job is a good fit for me.\n\nRelevant Experience\n✅ Primary experience bullet exp-primary-bullet-1 aligns with the posting through Python, ai, data, data pipelines, model, python. [job_posting] [EV-EXP-BULLET-001] [EV-EXP-001]\n✅ Internship experience at Copper Finch Systems supports additional overlap with ai, data, model. [job_posting] [EV-EXP-002]\n\nSeniority\n✅ Candidate has 3 years of experience, meeting the posting minimum of 2 years (exact). [cand-mira-solenne-001] [job_posting]\n\nEducation\n✅ Candidate education M.S. in Applied Data Science satisfies explicit posting education keywords. [job_posting] [EV-EDU-001]\n\nCore Skills\n✅ Aligned: Python, RAG, embeddings, vector search, vector databases, evaluation, NLP\n❌ Missing but evidenced in your profile: None\n❌ Genuine gaps: production ML, LLMs, prompt design, chunking, AWS GovCloud, speech recognition, data pipelines\n\nProjects\n❌ Current resume project GridPulse Load Forecaster has the lowest internal fit score (4.29) for this posting. [job_posting] [EV-PROJ-006]\n✅ Current resume project ModelWatch Release Guard is the strongest project match (10.29) for this posting. [job_posting] [EV-PROJ-003]\n❌ Swap suggestion: replace GridPulse Load Forecaster with CarePath Evidence Navigator (+21.42 internal fit points). [job_posting] [EV-PROJ-006] [EV-PROJ-001]",
+  "evidence_citation_count": 26,
+  "genuine_gap_count": 7,
+  "evidenced_missing_skill_count": 0,
+  "project_swap_recommended": true
+}

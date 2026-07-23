@@ -1,0 +1,145 @@
+{
+  "job_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
+  "title": "AI Engineer | Camden Corporate Office (Remote Position)",
+  "company": "Camden Property Trust",
+  "finalized_resume_revision": 0,
+  "company_hook": {
+    "phrase": "Its corporate technology organization explores AI tools that can improve resident services, property",
+    "citation": {
+      "source_type": "company_details",
+      "source_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
+      "source_field": "company_details",
+      "evidence_id": null,
+      "supported_claim": "Its corporate technology organization explores AI tools that can improve resident services, property"
+    }
+  },
+  "body_paragraphs": [
+    {
+      "text": "My background aligns with the practical responsibilities of this role. Built Python and scikit-learn risk models over SQL data pipelines, raising validated recall by 14% while holding the false-positive rate constant. This experience has equipped me with the skills to design and implement AI systems that align with the goals of improving property operations and resident services.",
+      "reason": "Connects verified candidate evidence to the role requirements.",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
+          "source_field": "job_description",
+          "evidence_id": null,
+          "supported_claim": ""
+        },
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-1",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-001",
+          "supported_claim": ""
+        },
+        {
+          "source_type": "memory_fact",
+          "source_id": "fact-37f5ab1ad220e99df53e",
+          "source_field": "normalized_value",
+          "evidence_id": null,
+          "supported_claim": ""
+        }
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "skill": "Python",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-1",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-001",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "REST APIs",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-2",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-002",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "RAG",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-2",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-002",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "MLOps",
+      "citations": [
+        {
+          "source_type": "portfolio_project",
+          "source_id": "proj-model-watch",
+          "source_field": "short_description",
+          "evidence_id": "EV-PROJ-003",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "vector databases",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-2",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-002",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "prompt engineering",
+      "citations": [
+        {
+          "source_type": "portfolio_project",
+          "source_id": "proj-carepath-rag",
+          "source_field": "short_description",
+          "evidence_id": "EV-PROJ-001",
+          "supported_claim": ""
+        }
+      ]
+    }
+  ],
+  "closing_sentence": "I look forward to the opportunity to contribute to Camden Property Trust's innovative initiatives and discuss how my skills can support your goals.",
+  "output_paths": {
+    "tex": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\cover_letter.tex",
+    "pdf": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\cover_letter.pdf",
+    "evidence_log": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\cover_letter_evidence.json"
+  },
+  "compilation": {
+    "command": [
+      "pdflatex",
+      "-interaction=nonstopmode",
+      "-halt-on-error",
+      "cover_letter.tex"
+    ],
+    "return_code": 0,
+    "pdf_path": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\cover_letter.pdf",
+    "page_count": 1,
+    "stdout_tail": "This is pdfTeX, Version 3.141592653-2.6-1.40.29 (MiKTeX 26.5) (preloaded format=pdflatex.fmt)\n restricted \\write18 enabled.\nentering extended mode\n(cover_letter.tex\nLaTeX2e <2026-06-01>\nL3 programming layer <2026-06-18>\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/base\\article.cls\nDocument Class: article 2025/01/22 v1.4n Standard LaTeX document class\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/base\\size11.clo))\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/l3backend\\l3backend-pdf\ntex.def)\nNo file cover_letter.aux.\n[1{C:/Users/Rob77/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]\n(cover_letter.aux) )<D:/Users/Rob77/AppData/Local/Programs/MiKTeX/fonts/type1/p\nublic/amsfonts/cm/cmbx10.pfb><D:/Users/Rob77/AppData/Local/Programs/MiKTeX/font\ns/type1/public/amsfonts/cm/cmbx12.pfb><D:/Users/Rob77/AppData/Local/Programs/Mi\nKTeX/fonts/type1/public/amsfonts/cm/cmr10.pfb>\nOutput written on cover_letter.pdf (1 page, 47519 bytes).\nTranscript written on cover_letter.log.\n",
+    "stderr_tail": ""
+  },
+  "page_count": 1,
+  "candidate_source_citation_count": 8,
+  "job_source_citation_count": 2,
+  "deterministic_plan_digest": "00c8f94a2722d067368f11d241da25f80e59e5c09b76e3644e4ed17b7eac4402",
+  "latex_sha256": "d1e22026c80deb274a8f8bf63cdd701542f9914e97ca6c5903f549ed422a6039",
+  "pdf_sha256": "ae49c46d0193d69e910c66332d6454f320df90269a80c0b674cc9fb6693e7d3d",
+  "no_fabrication_validated": true
+}

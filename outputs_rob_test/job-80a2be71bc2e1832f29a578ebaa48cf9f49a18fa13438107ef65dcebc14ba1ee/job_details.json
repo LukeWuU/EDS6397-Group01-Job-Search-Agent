@@ -1,0 +1,41 @@
+{
+  "job_id": "80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee",
+  "title": "AI Engineer",
+  "company": "Flash AI",
+  "industry_domain": "Public Safety / Investigative AI Software",
+  "location": "Remote, United States",
+  "required_skills": [
+    "Python",
+    "production ML",
+    "LLMs",
+    "RAG",
+    "prompt design",
+    "chunking",
+    "embeddings",
+    "vector search",
+    "vector databases",
+    "evaluation",
+    "AWS GovCloud",
+    "speech recognition",
+    "NLP",
+    "data pipelines"
+  ],
+  "experience_requirement": "2+ years of production machine learning or AI engineering experience",
+  "job_description": "1. Build production AI capabilities for investigative and public-safety software.\r\n2. Develop LLM and retrieval-augmented generation features for case information.\r\n3. Design document chunking, embedding, indexing, and vector-search pipelines.\r\n4. Improve prompt design, grounding, citation quality, and model evaluation.\r\n5. Integrate speech recognition, transcription, and NLP components.\r\n6. Deploy secure services in AWS and government-cloud environments.\r\n7. Create monitoring and testing for accuracy, latency, and reliability.\r\n8. Work with product and engineering teams to define user-facing workflows.\r\n9. Handle sensitive information with appropriate privacy and security controls.\r\n10. Write maintainable Python services and data-processing pipelines.\r\n11. Bring at least two years of production ML or AI engineering experience.\r\n12. Communicate model limitations and support responsible operational use.",
+  "company_details": "Flash AI develops investigative software intended to help law-enforcement and public-safety teams organize and analyze case information.\r\nThe company applies language, retrieval, and speech technologies to reduce manual work while emphasizing secure handling of sensitive data.",
+  "url": "https://www.indeed.com/viewjob?jk=b7622571bec57e5a",
+  "deterministic_score": {
+    "rank": 2,
+    "final_score": 69.0,
+    "breakdown": {
+      "skills_score": 50.0,
+      "skills_weighted": 25.0,
+      "experience_score": 100.0,
+      "experience_weighted": 25.0,
+      "industry_domain_score": 60.0,
+      "industry_domain_weighted": 9.0,
+      "location_score": 100.0,
+      "location_weighted": 10.0
+    }
+  }
+}

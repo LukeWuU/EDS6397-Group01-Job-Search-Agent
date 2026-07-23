@@ -1,0 +1,133 @@
+{
+  "job_id": "80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee",
+  "title": "AI Engineer",
+  "company": "Flash AI",
+  "finalized_resume_revision": 2,
+  "company_hook": {
+    "phrase": "Flash AI develops investigative software intended to help law-enforcement and public-safety",
+    "citation": {
+      "source_type": "company_details",
+      "source_id": "80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee",
+      "source_field": "company_details",
+      "evidence_id": null,
+      "supported_claim": "Flash AI develops investigative software intended to help law-enforcement and public-safety"
+    }
+  },
+  "body_paragraphs": [
+    {
+      "text": "My background aligns well with this opportunity. One documented example from my background is the following: Cross-functional collaboration with product and engineering teams. This experience has equipped me with the skills to work effectively in a dynamic and collaborative environment.",
+      "reason": "My background in translating requirements into deployable AI features aligns well with the goals of this role.",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee",
+          "source_field": "job_description",
+          "evidence_id": null,
+          "supported_claim": ""
+        },
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-1",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-001",
+          "supported_claim": ""
+        },
+        {
+          "source_type": "memory_fact",
+          "source_id": "fact-86b20add0a686f814a85",
+          "source_field": "normalized_value",
+          "evidence_id": null,
+          "supported_claim": ""
+        }
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "skill": "Python",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-1",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-001",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "RAG",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-2",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-002",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "Embeddings",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-2",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-002",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "NLP",
+      "citations": [
+        {
+          "source_type": "portfolio_project",
+          "source_id": "proj-carepath-rag",
+          "source_field": "short_description",
+          "evidence_id": "EV-PROJ-001",
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "skill": "vector search",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-2",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-002",
+          "supported_claim": ""
+        }
+      ]
+    }
+  ],
+  "closing_sentence": "I look forward to the opportunity to contribute to Flash AI's mission and discuss how my skills and experience align with your needs.",
+  "output_paths": {
+    "tex": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter.tex",
+    "pdf": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter.pdf",
+    "evidence_log": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter_evidence.json"
+  },
+  "compilation": {
+    "command": [
+      "pdflatex",
+      "-interaction=nonstopmode",
+      "-halt-on-error",
+      "cover_letter.tex"
+    ],
+    "return_code": 0,
+    "pdf_path": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\job-80a2be71bc2e1832f29a578ebaa48cf9f49a18fa13438107ef65dcebc14ba1ee\\cover_letter.pdf",
+    "page_count": 1,
+    "stdout_tail": "This is pdfTeX, Version 3.141592653-2.6-1.40.29 (MiKTeX 26.5) (preloaded format=pdflatex.fmt)\n restricted \\write18 enabled.\nentering extended mode\n(cover_letter.tex\nLaTeX2e <2026-06-01>\nL3 programming layer <2026-06-18>\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/base\\article.cls\nDocument Class: article 2025/01/22 v1.4n Standard LaTeX document class\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/base\\size11.clo))\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/l3backend\\l3backend-pdf\ntex.def)\nNo file cover_letter.aux.\n[1{C:/Users/Rob77/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]\n(cover_letter.aux) )<D:/Users/Rob77/AppData/Local/Programs/MiKTeX/fonts/type1/p\nublic/amsfonts/cm/cmbx10.pfb><D:/Users/Rob77/AppData/Local/Programs/MiKTeX/font\ns/type1/public/amsfonts/cm/cmbx12.pfb><D:/Users/Rob77/AppData/Local/Programs/Mi\nKTeX/fonts/type1/public/amsfonts/cm/cmr10.pfb>\nOutput written on cover_letter.pdf (1 page, 46528 bytes).\nTranscript written on cover_letter.log.\n",
+    "stderr_tail": ""
+  },
+  "page_count": 1,
+  "candidate_source_citation_count": 7,
+  "job_source_citation_count": 2,
+  "deterministic_plan_digest": "3608aa225817ad59430664a411b37cc46f145708484b08acca539b6cadc350ae",
+  "latex_sha256": "8280675b776298de8bf93492ec507a2e49045fc7ac28c1e51442f0f0563ac835",
+  "pdf_sha256": "4b1d35e554bf21455cc23a144ee789bbc7a5277bcf18e255b23d157733e1f75c",
+  "no_fabrication_validated": true
+}

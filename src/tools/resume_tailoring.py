@@ -1063,7 +1063,7 @@ def _apply_project_swap(
     )
 
 
-def compile_resume_pdf(tex_path: Path, *, timeout_seconds: int = 60) -> CompilationResult:
+def compile_resume_pdf(tex_path: Path, *, timeout_seconds: int = 180) -> CompilationResult:
     """Compile one generated LaTeX draft and require exactly one PDF page."""
     tex_path = tex_path.resolve()
     output_dir = tex_path.parent

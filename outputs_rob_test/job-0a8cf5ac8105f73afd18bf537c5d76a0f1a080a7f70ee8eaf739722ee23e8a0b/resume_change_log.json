@@ -1,0 +1,150 @@
+{
+  "job_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
+  "title": "AI Engineer | Camden Corporate Office (Remote Position)",
+  "company": "Camden Property Trust",
+  "revision_round": 0,
+  "review_feedback": null,
+  "edit_categories": [
+    "professional_summary",
+    "experience_bullet",
+    "project_swap"
+  ],
+  "changes": [
+    {
+      "category": "professional_summary",
+      "target_id": "summary",
+      "before": "Machine learning engineer with three years of experience building evaluated\r\nML models, retrieval-augmented APIs, and monitored AWS deployments. M.S. in\r\nApplied Data Science with strengths across Python, PyTorch, and MLOps.",
+      "after": "AI engineer with expertise in Python, REST APIs, vector databases, prompt engineering, RAG, and MLOps.",
+      "reason": "Aligns with the required role phrase and skills for the AI Engineer position.",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
+          "source_field": "required_skills_raw",
+          "evidence_id": null,
+          "supported_claim": ""
+        },
+        {
+          "source_type": "candidate_profile",
+          "source_id": "cand-mira-solenne-001",
+          "source_field": "experience",
+          "evidence_id": null,
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "category": "experience_bullet",
+      "target_id": "exp-primary-bullet-1",
+      "before": "Built Python and scikit-learn risk models over SQL pipelines,\r\n      raising validated recall by 14\\% at a constant false-positive rate.",
+      "after": "Built Python and scikit-learn risk models over SQL data pipelines, raising validated recall by 14% while holding the false-positive rate constant.",
+      "reason": "Demonstrates Python and risk modeling skills relevant to the AI Engineer role.",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-1",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-001",
+          "supported_claim": ""
+        },
+        {
+          "source_type": "job_posting",
+          "source_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
+          "source_field": "required_skills_raw",
+          "evidence_id": null,
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "category": "experience_bullet",
+      "target_id": "exp-primary-bullet-2",
+      "before": "Delivered a RAG knowledge API with FastAPI, embeddings, and\r\n      vector search, reducing median analyst lookup time by 36\\% in a pilot.",
+      "after": "Delivered a retrieval-augmented knowledge API with FastAPI, embeddings, and vector search, reducing median analyst lookup time by 36% in a controlled pilot.",
+      "reason": "Highlights vector databases and API development skills aligned with the job requirements.",
+      "citations": [
+        {
+          "source_type": "experience_bullet",
+          "source_id": "exp-primary-bullet-2",
+          "source_field": "text",
+          "evidence_id": "EV-EXP-BULLET-002",
+          "supported_claim": ""
+        },
+        {
+          "source_type": "job_posting",
+          "source_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
+          "source_field": "required_skills_raw",
+          "evidence_id": null,
+          "supported_claim": ""
+        }
+      ]
+    },
+    {
+      "category": "project_swap",
+      "target_id": "proj-grid-forecast->proj-carepath-rag",
+      "before": "  \\resumeEntry{GridPulse Load Forecaster}{2025}\r\n    {Python, pandas, NumPy, scikit-learn, MLflow}{Energy}\r\n  \\resumeItemListStart\r\n    \\resumeItem{Compared reproducible forecasting baselines and improved mean\r\n      absolute error by 12\\% over a seasonal-naive baseline across four windows.}\r\n  \\resumeItemListEnd",
+      "after": "  \\resumeEntry{CarePath Evidence Navigator}{2025}\n    {Python, FastAPI, PostgreSQL, Embeddings, Vector Search, Docker}{Healthcare}\n  \\resumeItemListStart\n    \\resumeItem{Retrieved a reviewer-approved supporting passage in the top three results for 87\\% of 120 synthetic evaluation questions.}\n  \\resumeItemListEnd",
+      "reason": "Replacing GridPulse Load Forecaster with CarePath Evidence Navigator to improve required-skill and domain alignment for this posting.",
+      "citations": [
+        {
+          "source_type": "job_posting",
+          "source_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
+          "source_field": "required_skills_raw",
+          "evidence_id": null,
+          "supported_claim": ""
+        },
+        {
+          "source_type": "portfolio_project",
+          "source_id": "proj-grid-forecast",
+          "source_field": "project_id",
+          "evidence_id": "EV-PROJ-006",
+          "supported_claim": ""
+        },
+        {
+          "source_type": "portfolio_project",
+          "source_id": "proj-carepath-rag",
+          "source_field": "project_id",
+          "evidence_id": "EV-PROJ-001",
+          "supported_claim": ""
+        },
+        {
+          "source_type": "fit_analysis",
+          "source_id": "0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b",
+          "source_field": "projects.swap_suggestion",
+          "evidence_id": null,
+          "supported_claim": "Replace GridPulse Load Forecaster with CarePath Evidence Navigator to improve required-skill and domain alignment for this posting."
+        }
+      ]
+    }
+  ],
+  "change_count": 4,
+  "summary_change_count": 1,
+  "experience_bullet_change_count": 2,
+  "skill_change_count": 0,
+  "project_swap_change_count": 1,
+  "base_resume_pdf_path": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_before.pdf",
+  "draft_tex_path": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_draft_r0.tex",
+  "draft_pdf_path": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_draft_r0.pdf",
+  "change_log_path": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\change_log_r0.json",
+  "compilation": {
+    "command": [
+      "pdflatex",
+      "-interaction=nonstopmode",
+      "-halt-on-error",
+      "resume_draft_r0.tex"
+    ],
+    "return_code": 0,
+    "pdf_path": "D:\\Users\\Rob77\\OneDrive\\Documents\\GitHub\\EDS6397-Group01-Job-Search-Agent\\outputs_rob_test\\.runtime\\drafts\\job-0a8cf5ac8105f73afd18bf537c5d76a0f1a080a7f70ee8eaf739722ee23e8a0b\\resume_draft_r0.pdf",
+    "page_count": 1,
+    "stdout_tail": "cal\\Programs\\MiKTeX\\tex/latex/kvsetkeys\\kvsetkeys.sty\n)\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/kvdefinekeys\\kvdefine\nkeys.sty)\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/pdfescape\\pdfescape.s\nty\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/ltxcmds\\ltxcmds.sty)\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/pdftexcmds\\pdftexcmds\n.sty\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/infwarerr\\infwarerr.s\nty)))\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hycolor\\hycolor.sty)\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\nameref.sty\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/refcount\\refcount.sty)\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/gettitlestring\\gettit\nlestring.sty\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/kvoptions\\kvoptions.sty\n)))\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/etoolbox\\etoolbox.sty)\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/stringenc\\stringenc.s\nty) (D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\pd1enc.def\n) (D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/intcalc\\intcalc.sty\n) (D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\puenc.def)\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/url\\url.sty)\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/bitset\\bitset.sty\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/bigintcalc\\bigintcalc\n.sty)))\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/hyperref\\hpdftex.def\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/rerunfilecheck\\rerunfil\necheck.sty\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/uniquecounter\\uniquec\nounter.sty)))\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel\\babel.sty\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel\\txtbabel.def)\n*************************************\n* Local config file bblopts.cfg used\n*\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/arabi\\bblopts.cfg)\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/generic/babel/locale/en\\babel\n-english.tex)\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/babel-english\\english.l\ndf)) (D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/tools\\tabularx.sty\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/tools\\array.sty))\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\tex/latex/l3backend\\l3backend-pdf\ntex.def)\nNo file resume_draft_r0.aux.\n\nLaTeX Font Warning: Font shape `OT1/cmr/bx/sc' undefined\n(Font)              using `OT1/cmr/bx/n' instead on input line 59.\n\n[1{C:/Users/Rob77/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]\n(resume_draft_r0.aux)Trying to make PK font tcrm1000 at 600 DPI...\nThe METAFONT mode is: ljfour\nCreating tcrm1000.pk...\nRunning miktex-mf.exe...\nRunning miktex-gftopk.exe...\nInstalling C:\\Users\\Rob77\\AppData\\Local\\MiKTeX\\fonts/pk/ljfour/jknappen/ec/dpi600\\tcrm1000.pk...\n\n\nLaTeX Font Warning: Some font shapes were not available, defaults substituted.\n\n\nPackage rerunfilecheck Warning: File `resume_draft_r0.out' has changed.\n(rerunfilecheck)                Rerun to get outlines right\n(rerunfilecheck)                or use package `bookmark'.\n\n ) <C:\\Users\\Rob77\\AppData\\Local\\MiKTeX\\fonts/pk/ljfour/jknappen/ec/dpi600\\tcrm\n1000.pk><D:/Users/Rob77/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfon\nts/cm/cmbx10.pfb><D:/Users/Rob77/AppData/Local/Programs/MiKTeX/fonts/type1/publ\nic/amsfonts/cm/cmbx12.pfb><D:/Users/Rob77/AppData/Local/Programs/MiKTeX/fonts/t\nype1/public/amsfonts/cm/cmcsc10.pfb><D:/Users/Rob77/AppData/Local/Programs/MiKT\neX/fonts/type1/public/amsfonts/cm/cmr10.pfb><D:/Users/Rob77/AppData/Local/Progr\nams/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy10.pfb><D:/Users/Rob77/AppData/Lo\ncal/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmti10.pfb>\nOutput written on resume_draft_r0.pdf (1 page, 101778 bytes).\nTranscript written on resume_draft_r0.log.\n",
+    "stderr_tail": "This is METAFONT, Version 2.71828182 (MiKTeX 26.5)\n\n\n\n\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\tcrm1000\n\n.mf\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\exbase.m\n\nf)\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\tcrm.mf\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\txsymb.m\n\nf\n\n Ok\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\exaccess\n\n.mf\n\n Ok)\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\txpseudo\n\n.mf\n\n Ok)\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\txaccent\n\n.mf\n\n Ok [0] [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12] [27] [29])\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\txgen.mf\n\n Ok [100] [109] [98] [99] [108])\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\txsymbol\n\n.mf\n\n Ok [13] [18] [21] [22] [23] [24] [25] [26] [28] [31] [32] [36] [39] [44]\n\n[45] [46] [42] [47] [60] [61] [62] [77] [79] [87] [110] [91] [93] [94] [95]\n\n[96] [126] [127] [128] [129] [130] [131] [132] [133] [134] [135] [136] [137]\n\n[138] [139] [140] [141] [142] [143] [144] [145] [146] [147] [148] [149]\n\n[150] [151] [152] [153] [154] [155] [156] [157] [158] [159] [160] [161]\n\n[162] [163] [164] [165] [166] [167] [168] [169] [171] [172] [173] [174]\n\n[175] [177] [176] [180] [181] [182] [183] [184] [187] [191] [214] [246])\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\txromod.\n\nmf\n\n Ok [48] [49] [50] [51] [52] [53] [54] [55] [56] [57])\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\txrsuper\n\n.mf\n\n Ok [185] [178] [179] [170] [186])\n\n(D:\\Users\\Rob77\\AppData\\Local\\Programs\\MiKTeX\\fonts/source/jknappen/ec\\txrfract\n\n.mf\n\n Ok [188] [189] [190]) ) ) )\n\n(some charht values had to be adjusted by as much as 0.06943pt)\n\nFont metrics written on tcrm1000.tfm.\n\nOutput written on tcrm1000.600gf (128 characters, 23548 bytes).\n\nTranscript written on tcrm1000.log.\n\nThis is GFtoPK, Version 2.4 (MiKTeX 26.5)\n\n'METAFONT output 2026.07.22:1916'\n\n23548 bytes packed to 11548 bytes.\n\n"
+  },
+  "page_count": 1,
+  "evidence_citation_count": 10,
+  "base_tex_sha256": "115e25bec9e69540d1f48c3c6b2dc772cfd13129f1e52cd89062dee06068d271",
+  "tailored_tex_sha256": "ea9aee81d4edea3bc31cf14b93f5a8efc05b000ad8fd2de82e284c7d75b442c4",
+  "protected_regions_sha256_before": "fa83463f604eaa92e981fea4c66f9d5e98eba8b03eba62ba9c27a72c9f5b137a",
+  "protected_regions_sha256_after": "fa83463f604eaa92e981fea4c66f9d5e98eba8b03eba62ba9c27a72c9f5b137a",
+  "protected_regions_unchanged": true,
+  "deterministic_plan_digest": "32ace1b2641b97afab2e34aaec1e9c62dbed005db3b2a0e8e3a24592dd8384a2"
+}

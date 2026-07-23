@@ -1,0 +1,40 @@
+{
+  "job_id": "66ff5b7d84909228e577d78e6de54e321052e87a2aee931634e0c207b11b96df",
+  "title": "AI Engineer",
+  "company": "BlackLine",
+  "industry_domain": "Financial Technology / Agentic AI for Accounting",
+  "location": "Remote or hybrid; employees within commuting distance may be expected in office three days per week",
+  "required_skills": [
+    "LLMs",
+    "RAG",
+    "multi-agent orchestration",
+    "GCP",
+    "AWS",
+    "model lifecycle",
+    "evaluation",
+    "monitoring",
+    "security",
+    "MLOps",
+    "customer-facing AI",
+    "prototyping",
+    "governance"
+  ],
+  "experience_requirement": "2+ years in customer-facing machine learning or agentic AI work; internships may count",
+  "job_description": "1. Prototype customer-facing AI solutions for finance and accounting workflows.\r\n2. Build agentic applications using LLMs, retrieval, and multi-agent orchestration.\r\n3. Create demonstrations and minimum viable products for customer validation.\r\n4. Assess technical feasibility, product value, data requirements, and risks.\r\n5. Partner with customers, product teams, architects, and engineering groups.\r\n6. Define evaluation methods for model quality and task completion.\r\n7. Establish monitoring, security, governance, and lifecycle practices.\r\n8. Move validated prototypes toward reliable production implementation.\r\n9. Use cloud AI and ML services, with GCP experience preferred.\r\n10. Communicate technical concepts clearly to customer and business audiences.\r\n11. Bring at least two years of relevant ML or agentic AI experience.\r\n12. Hold an advanced technical degree or demonstrate equivalent practical expertise.",
+  "company_details": "BlackLine provides cloud software that automates and controls accounting and financial-close processes for enterprise finance teams.\r\nIts AI initiatives aim to reduce manual reconciliation work, improve financial visibility, and introduce intelligent assistance into accounting workflows.",
+  "url": "https://www.indeed.com/viewjob?jk=d06a7b2204e3186e",
+  "deterministic_score": {
+    "rank": 3,
+    "final_score": 68.73,
+    "breakdown": {
+      "skills_score": 38.46,
+      "skills_weighted": 19.23,
+      "experience_score": 100.0,
+      "experience_weighted": 25.0,
+      "industry_domain_score": 100.0,
+      "industry_domain_weighted": 15.0,
+      "location_score": 95.0,
+      "location_weighted": 9.5
+    }
+  }
+}
